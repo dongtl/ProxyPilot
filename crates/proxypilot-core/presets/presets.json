@@ -1,0 +1,51 @@
+[
+  {
+    "id": "openai",
+    "name": "ChatGPT / OpenAI",
+    "description": "ChatGPT 网页与桌面版、OpenAI API、Codex",
+    "processes": ["ChatGPT.exe", "codex.exe"],
+    "domains": ["openai.com", "chatgpt.com", "oaistatic.com", "oaiusercontent.com", "challenges.cloudflare.com"]
+  },
+  {
+    "id": "claude",
+    "name": "Claude",
+    "description": "Claude 网页与桌面版、Claude Code、Anthropic API",
+    "processes": ["claude.exe"],
+    "domains": ["claude.ai", "claude.com", "anthropic.com", "claudeusercontent.com"]
+  },
+  {
+    "id": "google",
+    "name": "Google / Gemini",
+    "description": "Google 搜索、Gmail、Gemini、Google API",
+    "processes": [],
+    "domains": ["google.com", "google.com.hk", "googleapis.com", "gstatic.com", "googleusercontent.com", "ggpht.com", "gvt1.com", "gvt2.com", "withgoogle.com", "google.dev", "gmail.com"]
+  },
+  {
+    "id": "youtube",
+    "name": "YouTube",
+    "description": "YouTube 网页与视频",
+    "processes": [],
+    "domains": ["youtube.com", "youtu.be", "ytimg.com", "googlevideo.com", "ggpht.com"]
+  },
+  {
+    "id": "github",
+    "name": "GitHub",
+    "description": "GitHub 网站、代码下载、Copilot",
+    "processes": [],
+    "domains": ["github.com", "github.dev", "github.io", "githubusercontent.com", "githubassets.com", "githubcopilot.com", "ghcr.io", "githubstatus.com"]
+  },
+  {
+    "id": "dev-registries",
+    "name": "开发者软件源",
+    "description": "npm、PyPI、Docker Hub、crates.io、Go 模块、Hugging Face",
+    "processes": [],
+    "domains": ["npmjs.org", "npmjs.com", "pypi.org", "pythonhosted.org", "docker.io", "docker.com", "crates.io", "golang.org", "go.dev", "huggingface.co", "hf.co"]
+  },
+  {
+    "id": "cursor",
+    "name": "Cursor",
+    "description": "Cursor 编辑器及其 AI 服务",
+    "processes": ["Cursor.exe"],
+    "domains": ["cursor.com", "cursor.sh", "cursorapi.com"]
+  }
+]

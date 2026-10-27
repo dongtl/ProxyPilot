@@ -1,0 +1,36 @@
+[package]
+name = "proxypilot-core"
+description = "Split-routing logic for ProxyPilot: sing-box config, upstream detection, probes, core process management"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "proxypilot-cli"
+path = "src/bin/cli.rs"
+
+[dependencies]
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.151"
+url = "2.5.8"
+native-tls = "0.2.18"
+
+[target.'cfg(windows)'.dependencies.windows-sys]
+version = "0.61.2"
+features = [
+    "Win32_Foundation",
+    "Win32_Networking_WinSock",
+    "Win32_NetworkManagement_IpHelper",
+    "Win32_NetworkManagement_Ndis",
+    "Win32_Security",
+    "Win32_Security_Authorization",
+    "Win32_Security_Cryptography",
+    "Win32_System_JobObjects",
+    "Win32_System_Threading",
+    "Win32_System_Diagnostics_ToolHelp",
+    "Win32_System_Registry",
+]
+
+[dev-dependencies]
+tempfile = "3.27.0"

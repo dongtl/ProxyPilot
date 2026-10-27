@@ -1,0 +1,55 @@
+html,
+body,
+#app {
+  height: 100%;
+  margin: 0;
+}
+
+/* Hidden visually, still read by screen readers. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* Naive UI's own focus styling is subtle; give keyboard users a clear ring. */
+.pp-app .n-button:focus-visible,
+.pp-app .n-switch:focus-visible {
+  outline: 2px solid var(--pp-focus);
+  outline-offset: 2px;
+}
+
+.pp-page-title {
+  margin: 0 0 4px;
+  font-size: 22px;
+  font-weight: 600;
+}
+
+.pp-section-title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.pp-item-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.pp-hint {
+  margin: 4px 0 0;
+}
+
+/* Used by option render functions, which can end up teleported outside scoped styles. */
+.pp-option-path {
+  margin-left: 8px;
+  font-size: 12px;
+  opacity: 0.6;
+}

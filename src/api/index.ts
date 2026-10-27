@@ -1,0 +1,40 @@
+// The only place the frontend talks to the backend. Commands reject with a
+// Chinese error string the UI can show as-is.
+import { invoke } from "@tauri-apps/api/core";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import type {
+  AppState,
+  Candidate,
+  ConnectionRow,
+  DiagnosticReport,
+  ProbeReport,
+  RunningProcess,
+  SettingsPatch,
+  Upstream,
+} from "./types";
+
+export * from "./types";
+
+export const api = {
+  getState: () => invoke<AppState>("get_state"),
+  detectUpstreams: (full: boolean) => invoke<Candidate[]>("detect_upstreams", { full }),
+  setUpstream: (upstream: Upstream) => invoke<AppState>("set_upstream", { upstream }),
+  testUpstream: () => invoke<ProbeReport>("test_upstream"),
+  setRouting: (enabled: boolean) => invoke<AppState>("set_routing", { enabled }),
+  setProfileEnabled: (id: string, enabled: boolean) =>
+    invoke<AppState>("set_profile_enabled", { id, enabled }),
+  addSite: (input: string) => invoke<AppState>("add_site", { input }),
+  addApp: (process: string) => invoke<AppState>("add_app", { process }),
+  removeProfile: (id: string) => invoke<AppState>("remove_profile", { id }),
+  listProcesses: () => invoke<RunningProcess[]>("list_processes"),
+  getConnections: () => invoke<ConnectionRow[]>("get_connections"),
+  updateSettings: (patch: SettingsPatch) => invoke<AppState>("update_settings", { patch }),
+  openDataDir: () => invoke<void>("open_data_dir"),
+  /** Takes a few seconds: makes real connections and checks which way each went. */
+  runDiagnostics: (intranet: string | null) => invoke<DiagnosticReport>("run_diagnostics", { intranet }),
+};
+
+/** Backend pushes the full state whenever it changes on its own (core restart, upstream lost). */
+export function onStateChanged(handler: (state: AppState) => void): Promise<UnlistenFn> {
+  return listen<AppState>("state-changed", (event) => handler(event.payload));
+}

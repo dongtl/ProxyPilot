@@ -1,0 +1,19 @@
+[workspace]
+members = ["src-tauri", "crates/proxypilot-core"]
+resolver = "3"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "GPL-3.0-only"
+rust-version = "1.90"
+
+# Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = 3
+# A panic anywhere tears the process down; the Job Object then takes sing-box
+# with it, so no half-alive state where the UI is gone but routing remains.
+panic = "abort"
+strip = true

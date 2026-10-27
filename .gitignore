@@ -1,0 +1,34 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+node_modules
+dist
+dist-ssr
+*.local
+
+# Rust
+/target/
+
+# sing-box sidecar and its license, fetched by scripts/fetch-sing-box.ps1
+/src-tauri/binaries/
+/src-tauri/resources/sing-box-LICENSE.txt
+
+# Phase 0 verification output
+/runtime-phase0/
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
