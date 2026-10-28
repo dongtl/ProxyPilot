@@ -28,7 +28,7 @@ pub struct CustomProfile {
     pub enabled: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Settings {
     pub version: u32,
@@ -44,6 +44,28 @@ pub struct Settings {
     pub dns_mode: DnsMode,
     pub log_level: LogLevel,
     pub autostart: bool,
+    /// Look for a new release once a day. On by default, so files written
+    /// before this setting existed turn it on too.
+    pub check_updates: bool,
+}
+
+impl Default for Settings {
+    fn default() -> Self {
+        Settings {
+            version: 0,
+            upstream: None,
+            upstream_client: None,
+            routing_enabled: false,
+            enabled_presets: Vec::new(),
+            custom_profiles: Vec::new(),
+            direct_processes: Vec::new(),
+            intranet_domains: Vec::new(),
+            dns_mode: DnsMode::default(),
+            log_level: LogLevel::default(),
+            autostart: false,
+            check_updates: true,
+        }
+    }
 }
 
 /// What the config builder needs from the enabled profiles.
@@ -232,6 +254,9 @@ impl Settings {
         if let Some(level) = patch.log_level {
             self.log_level = level;
         }
+        if let Some(check) = patch.check_updates {
+            self.check_updates = check;
+        }
     }
 
     fn next_custom_id(&self) -> String {
@@ -321,6 +346,18 @@ mod tests {
         assert_eq!(loaded.intranet_domains, vec!["corp.cn"]);
         assert!(loaded.upstream.is_none());
         assert!(loaded.custom_profiles.is_empty());
+    }
+
+    #[test]
+    fn update_checks_default_on_for_old_files_and_can_be_turned_off() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        fs::write(&path, r#"{"version":1,"routingEnabled":true}"#).unwrap();
+        let (mut loaded, _) = Settings::load(&path);
+        assert!(loaded.check_updates);
+        loaded.apply_patch(&SettingsPatch { check_updates: Some(false), ..SettingsPatch::default() });
+        loaded.save(&path).unwrap();
+        assert!(!Settings::load(&path).0.check_updates);
     }
 
     #[test]

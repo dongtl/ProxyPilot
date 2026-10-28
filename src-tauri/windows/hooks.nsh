@@ -114,6 +114,14 @@
   ${EndIf}
   Pop $R8
   Pop $R7
+  ; An in-app update closed ProxyPilot to get here, so open it again. Done
+  ; here rather than by the installer's own restart, which starts it as a
+  ; standard user: ProxyPilot needs administrator rights, and this installer
+  ; already has them, so the user sees no second prompt.
+  ${If} $UpdateMode = 1
+  ${AndIf} $PassiveMode = 1
+    Exec '"$INSTDIR\${MAINBINARYNAME}.exe"'
+  ${EndIf}
 !macroend
 
 !macro NSIS_HOOK_POSTUNINSTALL

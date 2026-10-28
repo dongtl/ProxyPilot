@@ -1,9 +1,23 @@
-import type { Upstream } from "./api";
+import type { UpdateProgress, Upstream } from "./api";
 import { t } from "./i18n";
 
 /** "127.0.0.1:10808", with IPv6 hosts bracketed. */
 export function formatEndpoint(host: string, port: number): string {
   return host.includes(":") ? `[${host}]:${port}` : `${host}:${port}`;
+}
+
+/** Connection target: the port only when it is not the usual 443. */
+export function formatTarget(host: string, port: number): string {
+  return port === 443 ? host : formatEndpoint(host, port);
+}
+
+/** What the update button says while installing. */
+export function formatUpdateProgress(progress: UpdateProgress | null): string {
+  if (!progress) return t.update.preparing;
+  const { downloaded, total } = progress;
+  if (total && downloaded >= total) return t.update.launching;
+  if (total) return t.update.downloading(Math.floor((downloaded / total) * 100));
+  return t.update.downloadingSize((downloaded / 1024 / 1024).toFixed(1));
 }
 
 export function formatUpstream(upstream: Upstream): string {

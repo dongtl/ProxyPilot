@@ -7,6 +7,7 @@ mod paths;
 mod state;
 mod supervisor;
 mod tray;
+mod updates;
 
 use paths::{AppPaths, find_core};
 use proxypilot_core::settings::Settings;
@@ -24,6 +25,7 @@ pub fn run() {
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| tray::show_main(app)))
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(move |app| {
             let handle = app.handle().clone();
             let paths = AppPaths::resolve(&handle)?;
@@ -49,6 +51,7 @@ pub fn run() {
                 tx,
                 tray: Mutex::new(None),
                 clash_api: proxypilot_core::config::ClashApi::generate().ok(),
+                update: Mutex::new(None),
                 paths,
             });
             shared.log(&format!(
@@ -85,6 +88,7 @@ pub fn run() {
             app.manage(shared.clone());
             tray::build(&handle, &shared)?;
             supervisor::spawn(shared.clone(), rx);
+            updates::spawn(shared.clone());
             if lock(&shared.settings).routing_enabled {
                 shared.request_apply();
             }
@@ -116,6 +120,9 @@ pub fn run() {
             commands::update_settings,
             commands::open_data_dir,
             commands::run_diagnostics,
+            commands::check_update,
+            commands::install_update,
+            commands::open_releases,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

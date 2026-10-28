@@ -66,10 +66,27 @@ export interface AppState {
   dnsMode: DnsMode;
   logLevel: LogLevel;
   autostart: boolean;
+  /** Look for a new release about once a day. */
+  checkUpdates: boolean;
+  /** A newer release found by the last check, waiting for the user; null when none. */
+  update: UpdateInfo | null;
   elevated: boolean;
   env: EnvFinding[];
   dataDir: string;
   version: string;
+}
+
+export interface UpdateInfo {
+  version: string;
+  /** Release notes as written on the release page; may be empty. */
+  notes: string;
+}
+
+/** Pushed as "update-progress" while the installer downloads. */
+export interface UpdateProgress {
+  downloaded: number;
+  /** Bytes; null when the server did not say. */
+  total: number | null;
 }
 
 export interface ProbeStage {
@@ -94,9 +111,12 @@ export interface RunningProcess {
 }
 
 export interface ConnectionRow {
+  /** Executable name; empty when sing-box could not tell. */
   process: string;
   /** Domain when sniffed or resolved, otherwise the IP. */
   host: string;
+  /** The wider site `host` belongs to ("openai.com" for "chat.openai.com"); null when that adds nothing or is unsafe. */
+  site: string | null;
   port: number;
   route: "proxy" | "direct";
   count: number;
@@ -128,4 +148,5 @@ export interface SettingsPatch {
   dnsMode?: DnsMode;
   logLevel?: LogLevel;
   autostart?: boolean;
+  checkUpdates?: boolean;
 }

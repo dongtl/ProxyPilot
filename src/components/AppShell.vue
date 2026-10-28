@@ -2,8 +2,9 @@
 import { nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { NButton, NResult, NSpin, NText, useMessage, useThemeVars } from "naive-ui";
 import { t } from "../i18n";
-import { appState, disposeStore, initStore, loadError, setErrorNotifier } from "../store";
+import { appState, disposeStore, initStore, loadError, setErrorNotifier, updateBanner } from "../store";
 import { currentPage, goTo, type PageKey } from "../navigation";
+import UpdateBanner from "./UpdateBanner.vue";
 import HomePage from "../pages/HomePage.vue";
 import ProfilesPage from "../pages/ProfilesPage.vue";
 import ConnectionsPage from "../pages/ConnectionsPage.vue";
@@ -58,6 +59,7 @@ onBeforeUnmount(disposeStore);
 
     <main ref="mainEl" class="main" tabindex="-1">
       <div v-if="appState" class="content">
+        <UpdateBanner v-if="updateBanner" :update="updateBanner" />
         <HomePage v-if="currentPage === 'home'" :state="appState" />
         <ProfilesPage v-else-if="currentPage === 'profiles'" :state="appState" />
         <ConnectionsPage v-else-if="currentPage === 'connections'" :state="appState" />

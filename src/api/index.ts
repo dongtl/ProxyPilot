@@ -10,6 +10,8 @@ import type {
   ProbeReport,
   RunningProcess,
   SettingsPatch,
+  UpdateInfo,
+  UpdateProgress,
   Upstream,
 } from "./types";
 
@@ -32,9 +34,18 @@ export const api = {
   openDataDir: () => invoke<void>("open_data_dir"),
   /** Takes a few seconds: makes real connections and checks which way each went. */
   runDiagnostics: (intranet: string | null) => invoke<DiagnosticReport>("run_diagnostics", { intranet }),
+  /** Resolves null when already up to date. A found release also lands in AppState.update. */
+  checkUpdate: () => invoke<UpdateInfo | null>("check_update"),
+  /** Downloads and installs the found release. On Windows success never resolves: the app exits and reopens. */
+  installUpdate: () => invoke<void>("install_update"),
+  openReleases: () => invoke<void>("open_releases"),
 };
 
 /** Backend pushes the full state whenever it changes on its own (core restart, upstream lost). */
 export function onStateChanged(handler: (state: AppState) => void): Promise<UnlistenFn> {
   return listen<AppState>("state-changed", (event) => handler(event.payload));
+}
+
+export function onUpdateProgress(handler: (progress: UpdateProgress) => void): Promise<UnlistenFn> {
+  return listen<UpdateProgress>("update-progress", (event) => handler(event.payload));
 }

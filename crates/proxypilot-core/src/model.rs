@@ -180,8 +180,12 @@ pub enum Route {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ConnectionRow {
+    /// Empty when sing-box could not tell which program it was.
     pub process: String,
     pub host: String,
+    /// The site `host` belongs to, when that is wider than `host` itself and
+    /// safe to offer as "the whole site". See `domain::site_of`.
+    pub site: Option<String>,
     pub port: u16,
     pub route: Route,
     pub count: u32,
@@ -196,4 +200,5 @@ pub struct SettingsPatch {
     pub dns_mode: Option<DnsMode>,
     pub log_level: Option<LogLevel>,
     pub autostart: Option<bool>,
+    pub check_updates: Option<bool>,
 }

@@ -3,16 +3,37 @@
 // makes on its own through the state-changed event.
 import { computed, ref, shallowRef } from "vue";
 import type { UnlistenFn } from "@tauri-apps/api/event";
-import { api, onStateChanged, type AppState, type SettingsPatch, type Upstream } from "./api";
+import {
+  api,
+  onStateChanged,
+  onUpdateProgress,
+  type AppState,
+  type SettingsPatch,
+  type UpdateInfo,
+  type UpdateProgress,
+  type Upstream,
+} from "./api";
 import { t } from "./i18n";
 
 const state = shallowRef<AppState | null>(null);
 const bootError = ref<string | null>(null);
+// Update state is shared so the banner and the settings card show the same thing.
+const installing = ref(false);
+const progress = ref<UpdateProgress | null>(null);
+const dismissedVersion = ref<string | null>(null);
 
 export const appState = computed(() => state.value);
 export const loadError = computed(() => bootError.value);
+export const updateInstalling = computed(() => installing.value);
+export const updateProgress = computed(() => progress.value);
+/** The found release, unless the user chose "later" for this version on the banner. */
+export const updateBanner = computed(() => {
+  const update = state.value?.update ?? null;
+  return update && update.version !== dismissedVersion.value ? update : null;
+});
 
 let unlisten: UnlistenFn | null = null;
+let unlistenProgress: UnlistenFn | null = null;
 let pushCount = 0;
 let notifyError: (text: string) => void = (text) => console.error(text);
 
@@ -36,6 +57,11 @@ export async function initStore(): Promise<void> {
         state.value = next;
       });
     }
+    if (!unlistenProgress) {
+      unlistenProgress = await onUpdateProgress((next) => {
+        progress.value = next;
+      });
+    }
     const pushesBefore = pushCount;
     const initial = await api.getState();
     // A pushed state that arrived while get_state was in flight is at least as new.
@@ -48,6 +74,37 @@ export async function initStore(): Promise<void> {
 export function disposeStore(): void {
   unlisten?.();
   unlisten = null;
+  unlistenProgress?.();
+  unlistenProgress = null;
+}
+
+/** "latest" when up to date, the release when one was found, null when the check failed (already toasted). */
+async function checkUpdate(): Promise<UpdateInfo | "latest" | null> {
+  try {
+    const found = await api.checkUpdate();
+    if (!found) return "latest";
+    // Asking again means the user wants to see it, even after "later".
+    dismissedVersion.value = null;
+    return found;
+  } catch (err) {
+    notifyError(errorText(err));
+    return null;
+  }
+}
+
+/** On Windows success never comes back: the app exits and the installer reopens it. */
+async function installUpdate(): Promise<void> {
+  if (installing.value) return;
+  installing.value = true;
+  progress.value = null;
+  try {
+    await api.installUpdate();
+  } catch (err) {
+    notifyError(errorText(err));
+  } finally {
+    installing.value = false;
+    progress.value = null;
+  }
 }
 
 /** Runs a command that returns AppState. Resolves true on success; errors are toasted. */
@@ -85,4 +142,10 @@ export const actions = {
   listProcesses: () => query(() => api.listProcesses()),
   openDataDir: () => query(() => api.openDataDir()),
   runDiagnostics: (intranet: string | null) => query(() => api.runDiagnostics(intranet)),
+  checkUpdate,
+  installUpdate,
+  dismissUpdate: (version: string) => {
+    dismissedVersion.value = version;
+  },
+  openReleases: () => query(() => api.openReleases()),
 };

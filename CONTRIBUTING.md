@@ -21,3 +21,17 @@
 - 修改分流规则或 sing-box 配置时，同步更新 `docs/specs` 里的设计文档。
 - 日志和诊断信息里不能出现节点地址、UUID、密码、订阅链接、WS 路径、Host 或请求内容。
 - 预设只收录明确的服务域名，不收录范围过大的后缀（例如整个 `amazonaws.com`）。
+
+## 发版（维护者）
+
+正式版由 GitHub Actions 打包签名（`.github/workflows/release.yml`）：
+
+1. 把 `src-tauri/tauri.conf.json`、`package.json`、`Cargo.toml` 里的版本号改成同一个新版本，在 `CHANGELOG.md` 最上面写这个版本的更新内容。这段内容会显示在应用的更新提示里。
+2. 提交并推送，然后推送版本标签：`git tag v版本号`，`git push origin v版本号`。
+3. 等 Actions 跑完（约 20 分钟），Releases 里会出现一个草稿，带着安装包和 `latest.json`。下载安装包装一遍，确认没问题再点发布，不要勾选 Pre-release。
+
+想先试试能不能打包，可以在 Actions 页面手动运行 Release，这样只上传文件，不建 Release。
+
+签名私钥和密码存在仓库的 Actions 密钥里：`TAURI_SIGNING_PRIVATE_KEY` 是 `proxypilot.key` 文件的全部内容，`TAURI_SIGNING_PRIVATE_KEY_PASSWORD` 是密码。公钥在 `tauri.conf.json` 的 `plugins.updater.pubkey` 里。不要重新生成钥匙，已安装的版本只认这一把；私钥不要放进仓库，并且要备份，私钥丢了，已安装的用户就再也收不到自动更新。
+
+Actions 用不了时，可以在本机运行 `powershell -ExecutionPolicy Bypass -File scripts/release.ps1 -Key 私钥路径`（`.pub` 要放在同一个文件夹），按提示输入密码，再手动新建 Release，上传安装包和 `latest.json`。

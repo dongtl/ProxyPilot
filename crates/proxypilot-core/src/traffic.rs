@@ -1,5 +1,6 @@
 //! Recent connections, read from sing-box's Clash API and kept in memory only.
 
+use crate::domain::site_of;
 use crate::model::{ConnectionRow, Route};
 use serde::Deserialize;
 use serde_json::Value;
@@ -43,11 +44,11 @@ fn field(metadata: &HashMap<String, Value>, key: &str) -> String {
     }
 }
 
-/// File name of a process path. sing-box may append " (user)" on some systems.
+/// File name of a process path, empty when unknown. sing-box may append
+/// " (user)" on some systems.
 fn process_name(path: &str) -> String {
     let path = path.split(" (").next().unwrap_or(path).trim();
-    let name = path.rsplit(['\\', '/']).next().unwrap_or(path);
-    if name.is_empty() { "未知程序".into() } else { name.to_owned() }
+    path.rsplit(['\\', '/']).next().unwrap_or(path).to_owned()
 }
 
 pub fn parse_connections(body: &str) -> Result<Vec<Connection>, String> {
@@ -134,6 +135,7 @@ impl TrafficLog {
             let row = self.rows.entry(key).or_insert_with(|| ConnectionRow {
                 process: connection.process.clone(),
                 host: connection.host.clone(),
+                site: site_of(&connection.host),
                 port: connection.port,
                 route: connection.route,
                 count: 0,
@@ -177,19 +179,22 @@ mod tests {
         {"id":"b","metadata":{"destinationIP":"110.242.68.66","destinationPort":443,"host":"",
           "processPath":"C:\\Windows\\explorer.exe (user)"},"chains":["direct"]},
         {"id":"c","metadata":{"destinationIP":"172.19.0.2","destinationPort":"53","host":""},"chains":[]},
-        {"id":"d","metadata":{"destinationIP":"","destinationPort":"443","host":""},"chains":["direct"]}
+        {"id":"d","metadata":{"destinationIP":"","destinationPort":"443","host":""},"chains":["direct"]},
+        {"id":"e","metadata":{"destinationIP":"1.2.3.4","destinationPort":"443","host":"api.example.com"},"chains":["direct"]}
     ]}"#;
 
     #[test]
     fn parses_clash_api_snapshot_and_skips_dns_plumbing() {
         let list = parse_connections(SAMPLE).unwrap();
-        assert_eq!(list.len(), 2);
+        assert_eq!(list.len(), 3);
         assert_eq!(list[0], Connection {
             id: "a".into(), source_port: 50123, process: "ChatGPT.exe".into(), host: "chatgpt.com".into(), port: 443, route: Route::Proxy
         });
         assert_eq!(list[1].process, "explorer.exe");
         assert_eq!(list[1].host, "110.242.68.66");
         assert_eq!(list[1].route, Route::Direct);
+        // No process path: left empty so the UI neither shows nor offers a fake name.
+        assert_eq!(list[2].process, "");
         assert!(parse_connections(r#"{"connections":null}"#).unwrap().is_empty());
     }
 
@@ -200,7 +205,7 @@ mod tests {
         log.ingest(&list, 1_000);
         log.ingest(&list, 3_000);
         let rows = log.rows();
-        assert_eq!(rows.len(), 2);
+        assert_eq!(rows.len(), 3);
         assert!(rows.iter().all(|row| row.count == 1 && row.last_seen == 3_000));
         let mut again = list[0].clone();
         again.id = "a2".into();
@@ -208,6 +213,16 @@ mod tests {
         let rows = log.rows();
         assert_eq!(rows[0].host, "chatgpt.com");
         assert_eq!(rows[0].count, 2);
+    }
+
+    #[test]
+    fn rows_carry_the_site_to_offer() {
+        let mut log = TrafficLog::default();
+        log.ingest(&parse_connections(SAMPLE).unwrap(), 1_000);
+        let site = |host: &str| log.rows().into_iter().find(|row| row.host == host).unwrap().site;
+        assert_eq!(site("api.example.com").as_deref(), Some("example.com"));
+        assert_eq!(site("chatgpt.com"), None);
+        assert_eq!(site("110.242.68.66"), None);
     }
 
     #[test]

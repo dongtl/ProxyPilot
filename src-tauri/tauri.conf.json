@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "ProxyPilot",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "identifier": "app.proxypilot.desktop",
   "build": {
     "beforeDevCommand": "pnpm dev",
@@ -54,5 +54,15 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ]
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEVDMDVFQ0M2RkQ1MTgwQjIKUldTeWdGSDl4dXdGN0JpUDdsaDF3d216V0txNjhNWDBFSlQyMVB6MzNFNU5aTk1UMUJNdG0vSVcK",
+      "endpoints": ["https://github.com/dongtl/ProxyPilot/releases/latest/download/latest.json"],
+      "requireSignedVersion": true,
+      "windows": {
+        "installMode": "passive"
+      }
+    }
   }
 }

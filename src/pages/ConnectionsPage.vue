@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref } from "vue";
-import { NAlert, NEmpty, NFlex, NSpin, NText } from "naive-ui";
+import { computed, onBeforeUnmount, onMounted, ref } from "vue";
+import { NAlert, NEmpty, NFlex, NInput, NRadioButton, NRadioGroup, NSpin, NText } from "naive-ui";
 import { api, type AppState, type ConnectionRow } from "../api";
 import { t } from "../i18n";
 import { errorText } from "../store";
@@ -14,6 +14,19 @@ const rows = ref<ConnectionRow[]>([]);
 const loaded = ref(false);
 const error = ref<string | null>(null);
 const now = ref(Date.now());
+const filter = ref<"all" | "proxy" | "direct">("all");
+const search = ref("");
+
+const proxyCount = computed(() => rows.value.filter((row) => row.route === "proxy").length);
+
+const shown = computed(() => {
+  const query = search.value.trim().toLowerCase();
+  return rows.value.filter(
+    (row) =>
+      (filter.value === "all" || row.route === filter.value) &&
+      (!query || row.process.toLowerCase().includes(query) || row.host.toLowerCase().includes(query)),
+  );
+});
 
 let timer: ReturnType<typeof setTimeout> | null = null;
 let active = false;
@@ -59,13 +72,35 @@ onBeforeUnmount(() => {
       class="center"
       :description="state.routingEnabled ? t.connections.emptyOn : t.connections.emptyOff"
     />
-    <ConnectionsTable v-else :rows="rows" :now="now" />
+    <template v-else>
+      <NFlex align="center" justify="space-between" :size="12">
+        <NRadioGroup v-model:value="filter" size="small" role="radiogroup" :aria-label="t.connections.filterLabel">
+          <NRadioButton value="all">{{ t.connections.filterAll(rows.length) }}</NRadioButton>
+          <NRadioButton value="proxy">{{ t.connections.filterProxy(proxyCount) }}</NRadioButton>
+          <NRadioButton value="direct">{{ t.connections.filterDirect(rows.length - proxyCount) }}</NRadioButton>
+        </NRadioGroup>
+        <NInput
+          v-model:value="search"
+          size="small"
+          clearable
+          class="search"
+          :placeholder="t.connections.searchLabel"
+          :input-props="{ 'aria-label': t.connections.searchLabel, autocomplete: 'off', spellcheck: false }"
+        />
+      </NFlex>
+      <NEmpty v-if="shown.length === 0" class="center" :description="t.connections.noMatch" />
+      <ConnectionsTable v-else :rows="shown" :now="now" />
+    </template>
   </NFlex>
 </template>
 
 <style scoped>
 .page {
   margin-top: 12px;
+}
+
+.search {
+  width: 220px;
 }
 
 .center {

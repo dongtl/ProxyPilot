@@ -255,3 +255,19 @@ pub async fn open_data_dir(shared: State<'_, Arc<Shared>>) -> Cmd<()> {
     let dir = shared.paths.data.clone();
     tauri_plugin_opener::open_path(dir, None::<&str>).map_err(|error| format!("无法打开数据目录：{error}"))
 }
+
+/// Null means already up to date.
+#[tauri::command]
+pub async fn check_update(shared: State<'_, Arc<Shared>>) -> Cmd<Option<crate::updates::UpdateInfo>> {
+    crate::updates::check(shared.inner()).await
+}
+
+#[tauri::command]
+pub async fn install_update(shared: State<'_, Arc<Shared>>) -> Cmd<()> {
+    crate::updates::install(shared.inner()).await
+}
+
+#[tauri::command]
+pub async fn open_releases() -> Cmd<()> {
+    tauri_plugin_opener::open_url(crate::updates::RELEASES_URL, None::<&str>).map_err(|error| format!("无法打开浏览器：{error}"))
+}

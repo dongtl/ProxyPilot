@@ -46,6 +46,47 @@ fn validate(host: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Country codes whose registrable names sit one level down, so
+/// `example.com.cn` is a site and `com.cn` is not. Not the full Public Suffix
+/// List, only the ones people here are likely to meet.
+const MULTI_LABEL_SUFFIXES: &[&str] = &[
+    "com.cn", "net.cn", "org.cn", "gov.cn", "edu.cn", "ac.cn", "com.hk", "net.hk", "org.hk", "com.tw", "net.tw",
+    "org.tw", "com.sg", "com.my", "co.uk", "org.uk", "ac.uk", "co.jp", "ne.jp", "or.jp", "ac.jp", "co.kr", "or.kr",
+    "com.au", "net.au", "org.au", "co.nz", "com.br", "co.in", "co.id", "co.th", "com.tr", "com.mx",
+];
+
+/// Cloud and CDN platforms: everything under them belongs to someone
+/// different, so "the whole site" would mean every customer at once.
+const SHARED_SUFFIXES: &[&str] = &[
+    "amazonaws.com", "cloudfront.net", "azurewebsites.net", "azureedge.net", "cloudapp.net", "windows.net",
+    "trafficmanager.net", "appspot.com", "firebaseapp.com", "web.app", "run.app", "github.io", "gitlab.io",
+    "vercel.app", "netlify.app", "pages.dev", "workers.dev", "herokuapp.com", "fly.dev", "onrender.com",
+    "akamaized.net", "akamaihd.net", "edgekey.net", "edgesuite.net", "fastly.net",
+];
+
+/// The site a connection's host belongs to, offered as "the whole site" next
+/// to the host itself: `chat.openai.com` → `openai.com`.
+///
+/// None when that would add nothing (the host already is the site, after
+/// `normalise_domain` drops `www.`), when there is no domain (IPs), or when
+/// the host lives on a shared platform where the parent covers strangers.
+pub fn site_of(host: &str) -> Option<String> {
+    let host = normalise_domain(host).ok()?;
+    if SHARED_SUFFIXES.iter().any(|shared| host == *shared || host.ends_with(&format!(".{shared}"))) {
+        return None;
+    }
+    let labels: Vec<&str> = host.split('.').collect();
+    if labels.len() < 2 {
+        return None;
+    }
+    let last_two = labels[labels.len() - 2..].join(".");
+    let keep = if MULTI_LABEL_SUFFIXES.contains(&last_two.as_str()) { 3 } else { 2 };
+    if labels.len() <= keep {
+        return None;
+    }
+    Some(labels[labels.len() - keep..].join("."))
+}
+
 /// Normalise a list, dropping entries that fail and duplicates. Used for lists
 /// read from settings, where one bad entry must not discard the rest.
 pub fn normalise_all<'a>(items: impl IntoIterator<Item = &'a String>) -> Vec<String> {
@@ -94,6 +135,22 @@ mod tests {
         assert!(normalise_domain("").is_err());
         assert!(normalise_domain("exa mple.com").is_err());
         assert!(normalise_domain("-bad-.com").is_err());
+    }
+
+    #[test]
+    fn site_of_offers_the_parent_only_when_it_is_wider_and_safe() {
+        assert_eq!(site_of("chat.openai.com").as_deref(), Some("openai.com"));
+        assert_eq!(site_of("a.b.example.com").as_deref(), Some("example.com"));
+        assert_eq!(site_of("api.example.com.cn").as_deref(), Some("example.com.cn"));
+        assert_eq!(site_of("openai.com"), None);
+        assert_eq!(site_of("www.example.com"), None);
+        assert_eq!(site_of("example.com.cn"), None);
+        assert_eq!(site_of("com.cn"), None);
+        assert_eq!(site_of("q.us-east-1.amazonaws.com"), None);
+        assert_eq!(site_of("someone.github.io"), None);
+        assert_eq!(site_of("110.242.68.66"), None);
+        assert_eq!(site_of("2001:db8::1"), None);
+        assert_eq!(site_of("localhost"), None);
     }
 
     #[test]

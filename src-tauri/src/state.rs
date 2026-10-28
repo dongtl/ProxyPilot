@@ -1,7 +1,7 @@
 //! State shared by IPC commands, the tray and the supervisor thread.
 //!
-//! Lock discipline: take one of `settings`, `runtime`, `traffic` at a time and
-//! copy out what you need. Nothing holds two locks, so nothing can deadlock.
+//! Lock discipline: take one of `settings`, `runtime`, `traffic`, `update` at a
+//! time and copy out what you need. Nothing holds two locks, so nothing can deadlock.
 
 use crate::paths::{AppPaths, append_log};
 use crate::tray::TrayHandles;
@@ -48,6 +48,9 @@ pub struct AppState {
     pub dns_mode: DnsMode,
     pub log_level: LogLevel,
     pub autostart: bool,
+    pub check_updates: bool,
+    /// A newer release found by the last check, waiting for the user.
+    pub update: Option<crate::updates::UpdateInfo>,
     pub elevated: bool,
     pub env: Vec<EnvFinding>,
     pub data_dir: String,
@@ -70,6 +73,8 @@ pub struct Shared {
     pub tray: Mutex<Option<TrayHandles>>,
     /// The core's Clash API for this run of the app; None if it could not be prepared.
     pub clash_api: Option<proxypilot_core::config::ClashApi>,
+    /// The release the last check found, kept so installing does not ask GitHub again.
+    pub update: Mutex<Option<tauri_plugin_updater::Update>>,
 }
 
 /// A panic elsewhere must not take every later lock down with it.
@@ -88,6 +93,7 @@ impl Shared {
             let runtime = lock(&self.runtime);
             (runtime.core_status, runtime.core_message.clone(), runtime.upstream_status, runtime.env.clone())
         };
+        let update = lock(&self.update).as_ref().map(crate::updates::info);
         // A failed apply that fell back to the previous rules is still
         // "running"; say so where the user looks for problems.
         if core_status == CoreStatus::Running && !core_message.is_empty() {
@@ -111,6 +117,8 @@ impl Shared {
             dns_mode: settings.dns_mode,
             log_level: settings.log_level,
             autostart: settings.autostart,
+            check_updates: settings.check_updates,
+            update,
             elevated: self.elevated,
             env,
             data_dir: self.paths.data.to_string_lossy().into_owned(),

@@ -10,6 +10,7 @@ import UpstreamSettings from "../components/UpstreamSettings.vue";
 import EditableList from "../components/EditableList.vue";
 import ChoiceSetting from "../components/ChoiceSetting.vue";
 import AboutCard from "../components/AboutCard.vue";
+import UpdateSettings from "../components/UpdateSettings.vue";
 
 defineProps<{ state: AppState }>();
 
@@ -95,6 +96,8 @@ async function setAutostart(autostart: boolean) {
         <NButton @click="actions.openDataDir">{{ t.settings.openDataDir }}</NButton>
       </NFlex>
     </SectionCard>
+
+    <UpdateSettings :state="state" />
 
     <AboutCard :version="state.version" />
   </NFlex>

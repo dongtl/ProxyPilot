@@ -203,8 +203,12 @@ IPv6：旧版 TUN 只有 IPv4 地址，IPv6 流量可能绕过 TUN。新版给 T
 | `get_connections` | 无 | `ConnectionRow[]` |
 | `update_settings` | `patch: SettingsPatch` | `AppState` |
 | `open_data_dir` | 无 | 无 |
+| `run_diagnostics` | `intranet: string \| null` | `DiagnosticReport` |
+| `check_update` | 无 | `UpdateInfo \| null`（null 表示已是最新） |
+| `install_update` | 无 | 无（Windows 上成功时应用直接退出，由安装程序重新打开） |
+| `open_releases` | 无 | 无 |
 
-后端状态变化时（核心启停、上游掉线或恢复、规则应用完成）推送 `state-changed` 事件，载荷是完整的 `AppState`。
+后端状态变化时（核心启停、上游掉线或恢复、规则应用完成、发现新版本）推送 `state-changed` 事件，载荷是完整的 `AppState`。下载更新时推送 `update-progress`，载荷是 `UpdateProgress`。
 
 ## Phase 0：需要实机验证的风险
 
@@ -226,14 +230,24 @@ IPv6：旧版 TUN 只有 IPv4 地址，IPv6 流量可能绕过 TUN。新版给 T
 - 外部贡献：提交代码前须同意 `CONTRIBUTING.md` 里的贡献者许可协议，授权作者以其它条款再授权。规则、预设等数据贡献同样适用。
 - 名称和图标：建议尽早注册商标。fork 可以用代码，但不能用 ProxyPilot 这个名字。
 - 第三方组件：sing-box 以独立进程方式随包分发，在 `THIRD_PARTY_NOTICES.md` 里附上它的许可证（GPL-3.0-or-later）和对应版本的源码地址。发布前要核对 sing-box 许可证原文里的附加条款（例如对名称使用的限制）。
-- 不进公开仓库的内容：代码签名证书和私钥、更新服务器、以后的收费功能。
+- 不进公开仓库的内容：代码签名证书和私钥、更新签名私钥、以后的收费功能。
+
+## 自动更新（0.2 起）
+
+- 用 Tauri 官方的 updater 插件。更新清单 `latest.json` 和安装包都放在 GitHub Releases，地址固定为 `releases/latest/download/latest.json`，所以标成 Pre-release 的版本不会推给用户。
+- 安装包用 minisign 签名，公钥编译进应用，下载后先校验再安装。清单本身没有签名，但签名里记录了版本号，应用开启了 `requireSignedVersion`，把旧安装包冒充成新版本的清单会被拒绝。
+- 请求先走用户选的代理客户端（SOCKS5 用 `socks5h`，域名交给代理解析），代理不在或连不上时再直连（遵守系统代理）。
+- 启动 20 秒后检查一次，之后约每天一次，设置里可以关闭。只提示，不强制，用户点了才下载。
+- 安装时先像托盘“退出”一样停掉 sing-box，再以 `/P /UPDATE` 运行安装程序。安装程序自带的重启会以普通用户身份启动应用，所以关掉它，改由安装钩子在更新模式下直接以管理员身份重新打开。更新模式不卸载旧版，开机自启任务保留。
+- 发版：推送版本标签后，GitHub Actions（`.github/workflows/release.yml`）运行 `scripts/release.ps1`：核对三处版本号，签名构建，检查签名里的版本号和公钥标识，生成 `latest.json`，再建一个草稿 Release，人工确认后发布。更新说明取自 `CHANGELOG.md` 里这个版本的一节。
+- 签名私钥和密码存在仓库的 Actions 密钥里。构建任务只有只读权限；建 Release 的任务有写权限，但不运行项目代码。脚本也能在本机手动运行，作为备用。
 
 ## 分阶段计划
 
 - Phase 0：风险验证脚本，`proxypilot-cli`，静态检查。
 - Phase 1：Windows MVP，即上面模块 1 到 9。验收标准：在一台没装过本工具的电脑上，装好 v2rayN 或 Clash Verge Rev 后，不编辑任何文件就能完成三步设置并正常分流。
 - Phase 2：安装包（NSIS）、代码签名、规则包（rule-set）、HTTP 上游自动识别、多语言。
-- Phase 3：服务模式（界面不再需要管理员权限）、只读客户端适配器（从客户端配置里读端口）、自动更新。
+- Phase 3：服务模式（界面不再需要管理员权限）、只读客户端适配器（从客户端配置里读端口）、自动更新（0.2 已完成）。
 - Phase 4：macOS。手机端到时另行评估：Android 同一时间只允许一个 VPN 应用，iOS 基本不可行。
 
 ## 与旧项目的关系

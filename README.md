@@ -4,7 +4,7 @@
 
 ProxyPilot 不提供节点，它把流量交给你已经在用的代理客户端（v2rayN、Clash 等）。它不读取、也不修改代理客户端的配置和订阅。
 
-> 当前是 0.1 内测版，只支持 Windows 10/11。
+> 当前是 0.2 内测版，只支持 Windows 10/11。
 
 ## 支持哪些代理工具
 
@@ -22,13 +22,20 @@ ProxyPilot 不提供节点，它把流量交给你已经在用的代理客户端
 
 ## 安装
 
-1. 双击 `ProxyPilot_版本号_x64-setup.exe` 安装。
+1. 到 [Releases 页面](https://github.com/dongtl/ProxyPilot/releases/latest) 下载 `ProxyPilot_版本号_x64-setup.exe`，双击安装。
 2. 如果出现蓝色的“Windows 已保护你的电脑”，点“更多信息”，再点“仍要运行”。这是因为安装包还没有做代码签名。
 3. 每次打开 ProxyPilot 都会弹出“你要允许此应用对你的设备进行更改吗”，选“是”。创建虚拟网卡需要管理员权限。在设置里打开“开机自动启动”后，开机时不会再弹。
 
 可以装在任意位置，包括 D 盘。安装程序会把安装目录设成只有管理员能修改，防止别的程序替换掉以管理员身份运行的文件。
 
 卸载：Windows 设置 → 应用 → ProxyPilot → 卸载。卸载时会一并删除开机自启任务。
+
+## 更新
+
+- 从 0.2.0 开始，ProxyPilot 每天检查一次新版本。有新版本时界面顶部会出现提示，点“立即更新”会自动下载、校验并安装，装完自动重新打开，分流中断几秒钟。
+- 安装包带有签名，校验不通过的不会安装。
+- 在“设置 → 软件更新”里可以手动检查，也可以关掉自动检查。
+- 0.1.0 没有这个功能，需要手动升级一次：下载新版安装包直接安装。提示已安装旧版本时选默认选项；如果弹出卸载窗口，不要勾选“删除应用数据”，设置就会保留。
 
 ## 使用
 
@@ -42,7 +49,7 @@ ProxyPilot 不提供节点，它把流量交给你已经在用的代理客户端
 
 关闭窗口不会退出，ProxyPilot 会留在右下角托盘里继续工作。要完全退出，右键托盘图标点“退出”，网络会恢复成没装本工具时的样子。
 
-“最近连接”页能看到每个连接走的是代理还是直连，也能在那里把某个网站或程序直接改成走代理。
+“最近连接”页能看到每个连接走的是代理还是直连，可以筛选和搜索，也能在那里把某个网站、整个域名或程序直接改成走代理。
 
 ## 遇到问题
 
@@ -62,6 +69,7 @@ ProxyPilot 不提供节点，它把流量交给你已经在用的代理客户端
 ## 隐私
 
 - 不读取代理客户端的配置、订阅和节点，没有任何数据上报。
+- 检查更新时会访问 GitHub 读取最新版本信息，不发送任何个人数据。代理客户端在运行时会通过它访问。可以在设置里关掉自动检查。
 - 网络自检报告里不包含节点信息、IP 地址和内网地址，可以放心发给别人。
 - 默认日志只记录问题，不记录访问了哪些网站。
 - “最近连接”只保存在内存里，关闭 ProxyPilot 后清空。
@@ -69,12 +77,13 @@ ProxyPilot 不提供节点，它把流量交给你已经在用的代理客户端
 
 ## 项目现状
 
-0.1 内测版，主要功能已经完成：
+0.2 内测版，主要功能已经完成：
 
 - 自动找到代理端口，代理客户端换端口后会自动跟上
 - 按应用或网站分流，内置 ChatGPT、Claude、Google、YouTube、GitHub、Cursor、开发者软件源等常用项目
 - 企业 VPN、企业微信、钉钉和代理客户端自身始终直连
 - 环境检查、网络自检、托盘、开机自动启动、安装包
+- 应用内一键更新
 
 已知限制：
 
@@ -95,8 +104,10 @@ powershell -ExecutionPolicy Bypass -File scripts/fetch-sing-box.ps1   # 下载�
 cargo test --workspace                                                 # Rust 单元测试和 sing-box 配置检查
 pnpm build                                                             # 前端类型检查和构建
 pnpm tauri dev                                                         # 开发模式运行
-pnpm tauri build                                                       # 打包安装程序，输出在 target/release/bundle/nsis/
+pnpm tauri build                                                       # 打包安装程序（不签名），输出在 target/release/bundle/nsis/
 ```
+
+正式版推送版本标签后由 GitHub Actions 签名打包，并生成应用内更新用的 `latest.json`，步骤见 [CONTRIBUTING.md](CONTRIBUTING.md)。各版本的更新内容见 [CHANGELOG.md](CHANGELOG.md)。
 
 开发构建不会请求管理员权限。要真正开启分流（创建虚拟网卡），请在“以管理员身份运行”的终端里执行 `pnpm tauri dev`。正式版启动时会请求管理员权限。
 
@@ -113,7 +124,7 @@ cargo run -p proxypilot-core --bin proxypilot-cli -- env --upstream socks5://127
 - `src-tauri`：Tauri 外壳（窗口、托盘、后台任务、IPC）。
 - `src`：Vue 3 前端。
 - `docs/specs`：设计文档。
-- `scripts`：下载 sing-box、Phase 0 实机验证脚本（开发者用）。
+- `scripts`：下载 sing-box、发版、Phase 0 实机验证脚本（开发者用）。
 
 ## 工作原理
 
@@ -121,6 +132,6 @@ ProxyPilot 启动一个 [sing-box](https://github.com/SagerNet/sing-box) 虚拟�
 
 ## 许可证
 
-ProxyPilot 以 [GPL-3.0](LICENSE) 发布。随附的第三方组件见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
+ProxyPilot 以 [GPL-3.0](LICENSE) 发布。随附的第三方组件见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。ProxyPilot 是独立项目，不是 sing-box 项目的一部分，也未获得其作者的认可或背书。
 
 参与贡献前请阅读 [CONTRIBUTING.md](CONTRIBUTING.md)。

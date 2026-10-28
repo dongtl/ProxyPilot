@@ -22,6 +22,10 @@ dist-ssr
 # Phase 0 verification output
 /runtime-phase0/
 
+# Update signing keys never belong in the repo, even if copied here by mistake
+*.key
+*.key.pub
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

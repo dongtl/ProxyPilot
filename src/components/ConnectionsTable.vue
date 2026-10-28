@@ -1,31 +1,48 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
-import { NButton, NFlex, NTable, NTag, useMessage } from "naive-ui";
+import { NButton, NDropdown, NTable, NTag, useMessage } from "naive-ui";
 import type { ConnectionRow } from "../api";
 import { t } from "../i18n";
 import { actions } from "../store";
-import { formatDateTime, formatEndpoint, formatRelativeTime, isIpAddress } from "../format";
+import { formatDateTime, formatRelativeTime, formatTarget, isIpAddress } from "../format";
 
 const props = defineProps<{ rows: ConnectionRow[]; now: number }>();
 
 const message = useMessage();
 const pending = ref<string | null>(null);
 
-const sorted = computed(() => [...props.rows].sort((a, b) => b.lastSeen - a.lastSeen));
+type Choice = "host" | "site" | "app";
 
 function rowKey(row: ConnectionRow): string {
   return `${row.process}|${row.host}|${row.port}|${row.route}`;
 }
 
-async function proxySite(row: ConnectionRow) {
-  pending.value = `site:${rowKey(row)}`;
-  if (await actions.addSite(row.host)) message.success(t.connections.addedSite);
-  pending.value = null;
+/** What "this website" adds: the backend drops a leading "www.", so say so up front. */
+function hostDomain(host: string): string {
+  return host.replace(/^www\.(?=.+\.)/i, "");
 }
 
-async function proxyApp(row: ConnectionRow) {
-  pending.value = `app:${rowKey(row)}`;
-  if (await actions.addApp(row.process)) message.success(t.connections.addedApp);
+/** The ways a direct row can be sent through the proxy instead. */
+function choices(row: ConnectionRow): { key: Choice; label: string }[] {
+  if (row.route !== "direct") return [];
+  const out: { key: Choice; label: string }[] = [];
+  if (!isIpAddress(row.host)) out.push({ key: "host", label: t.connections.toProxyHost(hostDomain(row.host)) });
+  if (row.site) out.push({ key: "site", label: t.connections.toProxySite(row.site) });
+  if (row.process) out.push({ key: "app", label: t.connections.toProxyApp(row.process) });
+  return out;
+}
+
+const items = computed(() =>
+  [...props.rows]
+    .sort((a, b) => b.lastSeen - a.lastSeen)
+    .map((row) => ({ row, key: rowKey(row), choices: choices(row) })),
+);
+
+async function choose(row: ConnectionRow, key: string, choice: Choice) {
+  pending.value = key;
+  const target = choice === "app" ? row.process : choice === "site" ? row.site! : hostDomain(row.host);
+  const ok = choice === "app" ? await actions.addApp(row.process) : await actions.addSite(target);
+  if (ok) message.success(t.connections.added(target));
   pending.value = null;
 }
 </script>
@@ -44,41 +61,36 @@ async function proxyApp(row: ConnectionRow) {
         </tr>
       </thead>
       <tbody>
-        <tr v-for="row in sorted" :key="rowKey(row)">
-          <td class="wrap">{{ row.process || t.connections.unknownProcess }}</td>
-          <td class="wrap">{{ formatEndpoint(row.host, row.port) }}</td>
+        <tr v-for="item in items" :key="item.key">
+          <td class="wrap">{{ item.row.process || t.connections.unknownProcess }}</td>
+          <td class="wrap">{{ formatTarget(item.row.host, item.row.port) }}</td>
           <td>
-            <NTag size="small" :type="row.route === 'proxy' ? 'success' : 'default'" :bordered="false">
-              {{ row.route === "proxy" ? t.connections.routeProxy : t.connections.routeDirect }}
+            <NTag size="small" :type="item.row.route === 'proxy' ? 'success' : 'default'" :bordered="false">
+              {{ item.row.route === "proxy" ? t.connections.routeProxy : t.connections.routeDirect }}
             </NTag>
           </td>
-          <td class="num">{{ row.count }}</td>
-          <td class="nowrap" :title="formatDateTime(row.lastSeen)">{{ formatRelativeTime(row.lastSeen, now) }}</td>
-          <td>
-            <NFlex v-if="row.route === 'direct'" vertical :size="2" align="start">
+          <td class="num">{{ item.row.count }}</td>
+          <td class="nowrap" :title="formatDateTime(item.row.lastSeen)">
+            {{ formatRelativeTime(item.row.lastSeen, now) }}
+          </td>
+          <td class="nowrap">
+            <NDropdown
+              v-if="item.choices.length"
+              trigger="click"
+              :options="item.choices"
+              @select="(choice: Choice) => choose(item.row, item.key, choice)"
+            >
               <NButton
-                v-if="!isIpAddress(row.host)"
-                text
+                size="tiny"
+                secondary
                 type="primary"
-                size="small"
-                :loading="pending === `site:${rowKey(row)}`"
-                :aria-label="t.connections.actionAria(t.connections.siteToProxy, row.host)"
-                @click="proxySite(row)"
+                :loading="pending === item.key"
+                :aria-label="t.connections.toProxyAria(formatTarget(item.row.host, item.row.port))"
+                aria-haspopup="menu"
               >
-                {{ t.connections.siteToProxy }}
+                {{ t.connections.toProxy }}
               </NButton>
-              <NButton
-                v-if="row.process"
-                text
-                type="primary"
-                size="small"
-                :loading="pending === `app:${rowKey(row)}`"
-                :aria-label="t.connections.actionAria(t.connections.appToProxy, row.process)"
-                @click="proxyApp(row)"
-              >
-                {{ t.connections.appToProxy }}
-              </NButton>
-            </NFlex>
+            </NDropdown>
           </td>
         </tr>
       </tbody>
