@@ -4,8 +4,7 @@ import { NButton, NFlex, NSelect, NText, useMessage, type SelectOption } from "n
 import { open } from "@tauri-apps/plugin-dialog";
 import type { RunningProcess } from "../api";
 import { t } from "../i18n";
-import { actions, errorText } from "../store";
-import { basename } from "../format";
+import { actions, errorText, isMac } from "../store";
 import SectionCard from "./SectionCard.vue";
 
 const message = useMessage();
@@ -77,9 +76,11 @@ async function browse() {
       title: t.addApp.browseTitle,
       multiple: false,
       directory: false,
-      filters: [{ name: t.addApp.exeFilter, extensions: ["exe"] }],
+      // A macOS .app is a folder the picker treats as one file.
+      filters: [{ name: t.addApp.exeFilter, extensions: isMac.value ? ["app"] : ["exe"] }],
     });
-    if (path) await add(basename(path));
+    // The backend reduces the path to what rules match: file name or .app.
+    if (path) await add(path);
   } catch (err) {
     message.error(errorText(err));
   }
@@ -111,7 +112,7 @@ onMounted(loadProcesses);
         <NButton size="small" :loading="loadingList" @click="loadProcesses">{{ t.addApp.refresh }}</NButton>
         <NButton size="small" @click="browse">{{ t.addApp.browse }}</NButton>
       </NFlex>
-      <NText depth="3" tag="p" class="pp-hint">{{ t.addApp.hint }}</NText>
+      <NText depth="3" tag="p" class="pp-hint">{{ isMac ? t.addApp.hintMac : t.addApp.hint }}</NText>
     </form>
   </SectionCard>
 </template>

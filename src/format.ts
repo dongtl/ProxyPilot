@@ -56,8 +56,15 @@ export function summarizeList(items: string[], max: number): string {
   return items.length > max ? `${shown} ${t.common.andMore(items.length)}` : shown;
 }
 
+/**
+ * What a rule matches for a pasted name or path, as the backend's
+ * `platform::program_of` does: the outermost macOS `.app` the path is in,
+ * otherwise the file name. "/Applications/WeChat.app/" -> "WeChat.app".
+ */
 export function normalizeProcessName(input: string): string {
-  return basename(input.trim().replace(/^"|"$/g, ""));
+  const path = input.trim().replace(/^"|"$/g, "").replace(/\/+$/, "");
+  const bundle = path.split("/").find((part) => part.length > 4 && part.toLowerCase().endsWith(".app"));
+  return bundle ?? basename(path);
 }
 
 /** "*.corp.example.com" / ".corp.example.com" -> "corp.example.com". */

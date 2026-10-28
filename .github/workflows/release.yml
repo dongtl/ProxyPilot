@@ -1,6 +1,7 @@
 # Build, sign and draft a GitHub release when a version tag (v0.2.1 …) is
-# pushed. Running it by hand from the Actions tab tests the build: that run
-# only uploads the files as an artifact and creates no release.
+# pushed: the Windows installer and, from 0.3, the macOS dmg, with one
+# latest.json covering both. Running it by hand from the Actions tab tests
+# the builds: that run only uploads the files as artifacts and creates no release.
 #
 # Needs two repository secrets: TAURI_SIGNING_PRIVATE_KEY (the content of
 # proxypilot.key) and TAURI_SIGNING_PRIVATE_KEY_PASSWORD.
@@ -85,10 +86,49 @@ jobs:
             target/release/bundle/nsis/latest.json
           if-no-files-found: error
 
+  build-macos:
+    name: Build and sign (macOS)
+    runs-on: macos-latest
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24.13.0'
+
+      - name: Install pnpm and Rust
+        run: |
+          npm install --global pnpm@10.23.0
+          rustup toolchain install 1.99.1 --profile minimal --target aarch64-apple-darwin --target x86_64-apple-darwin
+          rustup default 1.99.1
+
+      - name: Install frontend dependencies
+        run: pnpm install --frozen-lockfile
+
+      # Builds sing-box from source, the helper, the app and the dmg.
+      - name: Build and sign
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: bash scripts/release-macos.sh "$GITHUB_REPOSITORY"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: macos-release
+          path: target/release-macos/*
+          if-no-files-found: error
+
   release:
     name: Draft the GitHub release
-    needs: build
-    if: github.ref_type == 'tag'
+    needs: [build, build-macos]
+    # The macOS build is newer and may fail on its own; Windows users must
+    # still get their release, so only the Windows build is required.
+    if: ${{ !cancelled() && github.ref_type == 'tag' && needs.build.result == 'success' }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -97,6 +137,24 @@ jobs:
         with:
           name: windows-release
           path: dist
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        if: needs.build-macos.result == 'success'
+        with:
+          name: macos-release
+          path: dist-macos
+
+      # One latest.json for both systems: each app reads only its own platform.
+      - name: Merge the update manifests
+        run: |
+          if [ -f dist-macos/latest-macos.json ]; then
+            jq -s '.[0] * {platforms: (.[0].platforms + .[1].platforms)}' dist/latest.json dist-macos/latest-macos.json > merged.json
+            mv merged.json dist/latest.json
+            mv dist-macos/*.dmg dist-macos/*.app.tar.gz dist/
+          else
+            echo "::warning::macOS 构建没有成功，这次 Release 只有 Windows 版。"
+          fi
+          jq '.platforms | keys' dist/latest.json
 
       # A draft is not "latest", so users get nothing until it is published.
       - name: Create a draft release
@@ -112,4 +170,4 @@ jobs:
           jq -r '.notes' dist/latest.json > notes.md
           gh release create "$TAG" --draft --verify-tag \
             --title "ProxyPilot ${TAG#v}" --notes-file notes.md \
-            dist/*-setup.exe dist/latest.json
+            dist/*-setup.exe dist/latest.json $(ls dist/*.dmg dist/*.app.tar.gz 2>/dev/null)

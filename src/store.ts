@@ -23,6 +23,8 @@ const progress = ref<UpdateProgress | null>(null);
 const dismissedVersion = ref<string | null>(null);
 
 export const appState = computed(() => state.value);
+/** For wording and macOS-only settings. False until the first state arrives. */
+export const isMac = computed(() => state.value?.platform === "macos");
 export const loadError = computed(() => bootError.value);
 export const updateInstalling = computed(() => installing.value);
 export const updateProgress = computed(() => progress.value);
@@ -92,7 +94,7 @@ async function checkUpdate(): Promise<UpdateInfo | "latest" | null> {
   }
 }
 
-/** On Windows success never comes back: the app exits and the installer reopens it. */
+/** Success never comes back: the app exits and reopens as the new version. */
 async function installUpdate(): Promise<void> {
   if (installing.value) return;
   installing.value = true;
@@ -137,6 +139,7 @@ export const actions = {
   addApp: (process: string) => apply(() => api.addApp(process)),
   removeProfile: (id: string) => apply(() => api.removeProfile(id)),
   updateSettings: (patch: SettingsPatch) => apply(() => api.updateSettings(patch)),
+  removeHelper: () => apply(() => api.removeHelper()),
   detectUpstreams: (full: boolean) => query(() => api.detectUpstreams(full)),
   testUpstream: () => query(() => api.testUpstream()),
   listProcesses: () => query(() => api.listProcesses()),

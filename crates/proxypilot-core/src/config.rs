@@ -4,12 +4,18 @@
 
 use crate::catalog::bypass_processes;
 use crate::model::{DnsMode, LogLevel, Upstream, UpstreamKind};
+use crate::platform::{Os, bundle_patterns, process_names};
 use crate::settings::{Settings, Targets, write_atomic};
 use serde_json::{Value, json};
 use std::io;
 use std::path::{Path, PathBuf};
 
+/// The adapter's name on Windows. macOS only accepts `utunN`, so there the
+/// name is left to sing-box and the adapter is recognised by [`TUN_ADDRESS`].
 pub const INTERFACE_NAME: &str = "ProxyPilot";
+
+/// Our end of the tunnel. Private, so direct by the intranet rules below.
+pub const TUN_ADDRESS: &str = "172.19.0.1";
 
 /// Payload is re-wrapped by the upstream client (SOCKS → its protocol → TLS →
 /// TCP/IP, roughly 80-120 bytes). Matching the physical 1500 forced
@@ -56,6 +62,7 @@ impl ClashApi {
     }
 }
 
+#[derive(Clone, Copy)]
 pub struct BuildInput<'a> {
     pub upstream: &'a Upstream,
     /// Executable that owns the upstream port right now, kept direct to prevent a loop.
@@ -67,6 +74,9 @@ pub struct BuildInput<'a> {
     pub log_level: LogLevel,
     pub log_path: &'a Path,
     pub clash_api: &'a ClashApi,
+    /// The system the config is for: decides the adapter name and how
+    /// program names become rules.
+    pub os: Os,
 }
 
 impl<'a> BuildInput<'a> {
@@ -88,6 +98,7 @@ impl<'a> BuildInput<'a> {
             log_level: settings.log_level,
             log_path,
             clash_api,
+            os: Os::CURRENT,
         }
     }
 }
@@ -102,21 +113,35 @@ fn intranet_suffixes(extra: &[String]) -> Vec<String> {
     all
 }
 
+/// Rules sending `names` to `outbound`: one by process name, and on macOS one
+/// by path for `.app` bundles. They stay separate rules because sing-box
+/// requires every field of one rule to match.
+fn program_rules(names: &[String], outbound: &str, os: Os) -> Vec<Value> {
+    let mut rules = Vec::new();
+    let processes = process_names(names, os);
+    if !processes.is_empty() {
+        rules.push(json!({"process_name": processes, "outbound": outbound}));
+    }
+    let bundles = bundle_patterns(names, os);
+    if !bundles.is_empty() {
+        rules.push(json!({"process_path_regex": bundles, "outbound": outbound}));
+    }
+    rules
+}
+
 pub fn build_route_rules(input: &BuildInput) -> Vec<Value> {
-    let mut rules = vec![
-        // Before sniffing: these processes never get their payload inspected,
-        // and a corporate VPN or the upstream client must not see its own
-        // traffic come back through us.
-        json!({"process_name": bypass_processes(input.direct_processes, input.upstream_owner), "outbound": "direct"}),
+    // Before sniffing: these processes never get their payload inspected,
+    // and a corporate VPN or the upstream client must not see its own
+    // traffic come back through us.
+    let mut rules = program_rules(&bypass_processes(input.direct_processes, input.upstream_owner), "direct", input.os);
+    rules.extend([
         json!({"action": "sniff"}),
         json!({"protocol": ["dns"], "action": "hijack-dns"}),
         json!({"ip_cidr": INTRANET_CIDRS, "outbound": "direct"}),
         json!({"ip_is_private": true, "outbound": "direct"}),
         json!({"domain_suffix": intranet_suffixes(input.intranet_domains), "outbound": "direct"}),
-    ];
-    if !input.targets.processes.is_empty() {
-        rules.push(json!({"process_name": input.targets.processes, "outbound": "proxy"}));
-    }
+    ]);
+    rules.extend(program_rules(&input.targets.processes, "proxy", input.os));
     if !input.targets.domains.is_empty() {
         rules.push(json!({"domain_suffix": input.targets.domains, "outbound": "proxy"}));
     }
@@ -167,25 +192,28 @@ pub fn build_config(input: &BuildInput) -> Value {
         }),
     };
     let final_dns = if input.dns_mode == DnsMode::Encrypted { "direct_dns" } else { "system_dns" };
+    let mut tun = json!({
+        "type": "tun",
+        "tag": "tun-in",
+        // Both families, so IPv6 traffic meets the same rules instead of
+        // leaving through the physical adapter untouched. 172.19/30 is
+        // private and therefore direct by the rules above.
+        "address": [format!("{TUN_ADDRESS}/30"), "fdfe:dcba:9876::1/126".to_owned()],
+        "mtu": TUN_MTU,
+        "auto_route": true,
+        "strict_route": true,
+        // "system" hands TCP to the kernel stack; "gvisor" reassembles every
+        // packet in userspace, which on Windows terminates each connection
+        // locally and hides real latency until the first data exchange.
+        "stack": "system",
+    });
+    if input.os == Os::Windows {
+        tun["interface_name"] = json!(INTERFACE_NAME);
+    }
     json!({
         "log": {"level": input.log_level.as_str(), "timestamp": true, "output": input.log_path.to_string_lossy()},
         "dns": build_dns(input),
-        "inbounds": [{
-            "type": "tun",
-            "tag": "tun-in",
-            "interface_name": INTERFACE_NAME,
-            // Both families, so IPv6 traffic meets the same rules instead of
-            // leaving through the physical adapter untouched. 172.19/30 is
-            // private and therefore direct by the rules above.
-            "address": ["172.19.0.1/30", "fdfe:dcba:9876::1/126"],
-            "mtu": TUN_MTU,
-            "auto_route": true,
-            "strict_route": true,
-            // "system" hands TCP to the kernel stack; "gvisor" reassembles every
-            // packet in userspace, which on Windows terminates each connection
-            // locally and hides real latency until the first data exchange.
-            "stack": "system",
-        }],
+        "inbounds": [tun],
         // direct first: anything that names no detour uses the first outbound.
         "outbounds": [
             {"type": "direct", "tag": "direct"},
@@ -262,6 +290,7 @@ mod tests {
             log_level: LogLevel::Warn,
             log_path: Path::new("C:/data/runtime/sing-box.log"),
             clash_api: api,
+            os: Os::Windows,
         }
     }
 
@@ -332,5 +361,28 @@ mod tests {
         assert_eq!(config["outbounds"][1], json!({"type": "http", "tag": "proxy", "server": "127.0.0.1", "server_port": 7890}));
         assert_eq!(config["experimental"]["clash_api"]["external_controller"], "127.0.0.1:49152");
         assert_eq!(config["inbounds"][0]["interface_name"], INTERFACE_NAME);
+        assert_eq!(config["inbounds"][0]["address"][0], "172.19.0.1/30");
+    }
+
+    #[test]
+    fn macos_matches_bundles_by_path_and_lets_sing_box_name_the_adapter() {
+        let (up, a) = (upstream(), api());
+        let t = Targets { processes: vec!["Cursor.app".into(), "codex".into()], domains: vec!["openai.com".into()] };
+        let mut built = input(&up, &t, &a, DnsMode::Encrypted);
+        built.os = Os::MacOs;
+        let config = build_config(&built);
+        assert!(config["inbounds"][0].get("interface_name").is_none());
+        let rules = config["route"]["rules"].as_array().unwrap();
+        // Bypass first: names without .exe, then bundles by path, then sniff.
+        let names = rules[0]["process_name"].as_array().unwrap();
+        assert!(names.iter().any(|v| v == "xray") && names.iter().all(|v| !v.as_str().unwrap().ends_with(".exe")));
+        assert_eq!(names.last().unwrap(), "my-core");
+        assert_eq!(rules[1]["outbound"], "direct");
+        assert!(rules[1]["process_path_regex"].as_array().unwrap().iter().any(|v| v == r"(?i)/aTrust\.app/Contents/"));
+        assert_eq!(rules[2]["action"], "sniff");
+        let proxy: Vec<&Value> = rules.iter().filter(|rule| rule["outbound"] == "proxy").collect();
+        assert_eq!(proxy[0], &json!({"process_name": ["codex"], "outbound": "proxy"}));
+        assert_eq!(proxy[1], &json!({"process_path_regex": [r"(?i)/Cursor\.app/Contents/"], "outbound": "proxy"}));
+        assert_eq!(proxy[2], &json!({"domain_suffix": ["openai.com"], "outbound": "proxy"}));
     }
 }

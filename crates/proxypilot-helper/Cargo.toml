@@ -1,0 +1,13 @@
+[package]
+name = "proxypilot-helper"
+description = "ProxyPilot's macOS background helper: runs sing-box as root for the unprivileged app"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+proxypilot-core = { path = "../proxypilot-core" }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+libc = "0.2.191"

@@ -17,7 +17,8 @@ const USAGE: &str = "用法：
   proxypilot-cli probe --upstream socks5://127.0.0.1:10808
   proxypilot-cli gen-config --upstream URL --out FILE [--log FILE] [--preset ID]... [--site DOMAIN]...
                             [--app EXE]... [--intranet DOMAIN]... [--dns encrypted|system] [--log-level warn|info|debug]
-  proxypilot-cli check --core sing-box.exe --config FILE";
+  proxypilot-cli check --core sing-box.exe --config FILE
+  proxypilot-cli helper-run --upstream URL [--site DOMAIN]... [--app NAME]... --command SHELL   (macOS)";
 
 fn parse_upstream(text: &str) -> Result<Upstream, String> {
     let (kind, rest) = match text.split_once("://") {
@@ -78,7 +79,7 @@ fn run(command: &str, args: &Args) -> Result<(), String> {
             let alive = upstream.as_ref().is_some_and(|up| upstream_alive(up, Duration::from_millis(500)));
             // The CLI runs no core, so an adapter with our name is not its own,
             // and it is a dev tool, not an install whose folder we check.
-            print(&evaluate(&EnvInput::gather(true, false, upstream.is_some(), alive, false)));
+            print(&evaluate(&EnvInput::gather(proxypilot_core::sys::is_elevated(), true, false, upstream.is_some(), alive, false)));
         }
         "probe" => print(&probe_upstream(&parse_upstream(args.required("upstream")?)?, Duration::from_secs(15))),
         "gen-config" => {
@@ -124,9 +125,44 @@ fn run(command: &str, args: &Args) -> Result<(), String> {
             core.check(&PathBuf::from(args.required("config")?))?;
             println!("ok");
         }
+        #[cfg(unix)]
+        "helper-run" => helper_run(args)?,
         _ => return Err(USAGE.into()),
     }
     Ok(())
+}
+
+/// macOS smoke test: have the installed helper route `--site`s and `--app`s
+/// through `--upstream`, run `--command` while it does, then stop. The rules
+/// last only as long as this connection, as they do for the app.
+#[cfg(unix)]
+fn helper_run(args: &Args) -> Result<(), String> {
+    use proxypilot_core::backend::ApplyRequest;
+    use proxypilot_core::helper::{Client, Request};
+    let upstream = parse_upstream(args.required("upstream")?)?;
+    let command = args.required("command")?;
+    let mut settings = Settings::default();
+    for site in args.all("site") {
+        settings.add_site(site)?;
+    }
+    for app in args.all("app") {
+        settings.add_app(app)?;
+    }
+    let api = ClashApi::generate().map_err(|error| error.to_string())?;
+    let owner = upstream_owner(&upstream).and_then(|(_, name)| name);
+    let mut client = Client::connect().map_err(|error| format!("连不上后台助手：{error}"))?;
+    let hello = client.call(&Request::Hello).map_err(|error| error.to_string())?;
+    eprintln!("helper {}", hello.version);
+    let request = ApplyRequest::from_settings(&settings, &upstream, owner.as_deref(), &api);
+    let reply = client.call(&Request::Apply { request }).map_err(|error| error.to_string())?;
+    let outcome = reply.outcome.ok_or(reply.error)?;
+    if !outcome.ok {
+        return Err(format!("apply failed: {}", outcome.message));
+    }
+    eprintln!("routing on, sing-box pid {:?}, tun present {}", reply.state.pid, proxypilot_core::sys::tun_present());
+    let status = std::process::Command::new("/bin/sh").arg("-c").arg(command).status().map_err(|error| error.to_string())?;
+    let _ = client.call(&Request::Stop);
+    if status.success() { Ok(()) } else { Err(format!("command failed: {status}")) }
 }
 
 fn main() -> ExitCode {

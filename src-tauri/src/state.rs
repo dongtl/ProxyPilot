@@ -10,6 +10,7 @@ use proxypilot_core::traffic::TrafficLog;
 use proxypilot_core::*;
 use serde::Serialize;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::Sender;
 use std::sync::{Mutex, MutexGuard};
 use tauri::{AppHandle, Emitter};
@@ -51,7 +52,13 @@ pub struct AppState {
     pub check_updates: bool,
     /// A newer release found by the last check, waiting for the user.
     pub update: Option<crate::updates::UpdateInfo>,
+    /// Whether a TUN can be created: administrator rights on Windows, a
+    /// ready background helper on macOS.
     pub elevated: bool,
+    /// "windows" or "macos", for wording and macOS-only settings.
+    pub platform: &'static str,
+    /// macOS: whether the background helper is installed.
+    pub helper_installed: bool,
     pub env: Vec<EnvFinding>,
     pub data_dir: String,
     pub version: String,
@@ -64,7 +71,11 @@ pub struct Shared {
     /// Something we run elevated that ordinary programs could change; while
     /// set, the core is not started and autostart is refused.
     pub unprotected: Option<PathBuf>,
+    /// The process's own administrator rights on Windows. Always true on
+    /// macOS, where the helper holds the rights instead.
     pub elevated: bool,
+    /// Last known answer of the supervisor's `can_route`.
+    pub can_route: AtomicBool,
     pub version: String,
     pub settings: Mutex<Settings>,
     pub runtime: Mutex<Runtime>,
@@ -75,6 +86,13 @@ pub struct Shared {
     pub clash_api: Option<proxypilot_core::config::ClashApi>,
     /// The release the last check found, kept so installing does not ask GitHub again.
     pub update: Mutex<Option<tauri_plugin_updater::Update>>,
+}
+
+fn helper_installed() -> bool {
+    #[cfg(target_os = "macos")]
+    return crate::helper_client::installed();
+    #[cfg(not(target_os = "macos"))]
+    return false;
 }
 
 /// A panic elsewhere must not take every later lock down with it.
@@ -119,11 +137,17 @@ impl Shared {
             autostart: settings.autostart,
             check_updates: settings.check_updates,
             update,
-            elevated: self.elevated,
+            elevated: self.can_route.load(Ordering::Relaxed),
+            platform: if cfg!(target_os = "macos") { "macos" } else { "windows" },
+            helper_installed: helper_installed(),
             env,
             data_dir: self.paths.data.to_string_lossy().into_owned(),
             version: self.version.clone(),
         }
+    }
+
+    pub fn set_can_route(&self, ready: bool) {
+        self.can_route.store(ready, Ordering::Relaxed);
     }
 
     /// Push the state to the window and the tray.

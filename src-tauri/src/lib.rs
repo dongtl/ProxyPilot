@@ -3,6 +3,8 @@
 
 mod autostart;
 mod commands;
+#[cfg(target_os = "macos")]
+mod helper_client;
 mod paths;
 mod state;
 mod supervisor;
@@ -33,11 +35,14 @@ pub fn run() {
             let (tx, rx) = std::sync::mpsc::channel();
             let core_exe = find_core();
             let unprotected = paths::unprotected(&paths.runtime, core_exe.as_deref());
+            // macOS: the helper holds the rights, checked by the supervisor.
+            let elevated = cfg!(target_os = "macos") || proxypilot_core::sys::is_elevated();
             let shared = Arc::new(Shared {
                 app: handle.clone(),
                 core_exe,
                 unprotected,
-                elevated: proxypilot_core::sys::is_elevated(),
+                elevated,
+                can_route: std::sync::atomic::AtomicBool::new(elevated && !cfg!(target_os = "macos")),
                 version: app.package_info().version.to_string(),
                 settings: Mutex::new(settings),
                 runtime: Mutex::new(Runtime {
@@ -93,7 +98,9 @@ pub fn run() {
                 shared.request_apply();
             }
             shared.emit();
-            if !autostarted {
+            if autostarted {
+                tray::set_dock(&handle, false);
+            } else {
                 tray::show_main(&handle);
             }
             Ok(())
@@ -103,6 +110,7 @@ pub fn run() {
             if let WindowEvent::CloseRequested { api, .. } = event {
                 api.prevent_close();
                 let _ = window.hide();
+                tray::set_dock(window.app_handle(), false);
             }
         })
         .invoke_handler(tauri::generate_handler![
@@ -123,7 +131,19 @@ pub fn run() {
             commands::check_update,
             commands::install_update,
             commands::open_releases,
+            commands::remove_helper,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app, event| {
+            // Cmd+Q and "Quit" in the Dock menu (macOS) arrive without an exit
+            // code; take the tray's way out so sing-box stops first. Its own
+            // exit then comes back with a code and goes through.
+            if let tauri::RunEvent::ExitRequested { code: None, api, .. } = event
+                && let Some(shared) = app.try_state::<Arc<Shared>>()
+            {
+                api.prevent_exit();
+                tray::quit(shared.inner().clone());
+            }
+        });
 }

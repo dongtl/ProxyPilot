@@ -167,7 +167,8 @@ fn log_tail(path: &Path, from: u64) -> String {
     clean_output(&String::from_utf8_lossy(&bytes[start..]))
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// Also the helper's answer to an apply request, hence serde.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ApplyOutcome {
     pub ok: bool,
     pub message: String,

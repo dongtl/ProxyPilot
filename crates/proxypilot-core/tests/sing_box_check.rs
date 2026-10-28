@@ -4,6 +4,7 @@
 
 use proxypilot_core::config::{BuildInput, ClashApi, build_config, write_config};
 use proxypilot_core::core::{Runner, SingBox};
+use proxypilot_core::platform::Os;
 use proxypilot_core::settings::Targets;
 use proxypilot_core::{DnsMode, LogLevel, Upstream, UpstreamKind};
 use std::path::PathBuf;
@@ -13,7 +14,8 @@ fn sing_box() -> Option<PathBuf> {
     if let Ok(path) = std::env::var("PROXYPILOT_SING_BOX") {
         return Some(PathBuf::from(path));
     }
-    let bundled = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../src-tauri/binaries/sing-box-x86_64-pc-windows-msvc.exe");
+    let fetched = if cfg!(windows) { "binaries/sing-box-x86_64-pc-windows-msvc.exe" } else { "binaries/macos/sing-box" };
+    let bundled = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../src-tauri").join(fetched);
     bundled.exists().then_some(bundled)
 }
 
@@ -27,7 +29,10 @@ fn generated_configs_pass_sing_box_check() {
     let dir = tempfile::tempdir().unwrap();
     let log = dir.path().join("sing-box.log");
     let api = ClashApi { port: 49152, secret: "0123456789abcdef".into() };
-    let full = Targets { processes: vec!["codex.exe".into(), "Zed.exe".into()], domains: vec!["openai.com".into(), "github.com".into()] };
+    let full = Targets {
+        processes: vec!["codex.exe".into(), "Zed.exe".into(), "Visual Studio Code.app".into()],
+        domains: vec!["openai.com".into(), "github.com".into()],
+    };
     let empty = Targets::default();
     let intranet = vec!["corp.example.cn".to_owned()];
     let direct = vec!["Corp.exe".to_owned()];
@@ -48,18 +53,24 @@ fn generated_configs_pass_sing_box_check() {
                     log_level: LogLevel::Info,
                     log_path: &log,
                     clash_api: &api,
+                    os: Os::CURRENT,
                 };
-                let path = dir.path().join(format!("case-{case}.json"));
-                write_config(&build_config(&input), &path).unwrap();
-                let label = format!("case {case} ({kind:?}, {mode:?}, {} targets)", targets.domains.len());
-                if let Err(message) = core.check(&path) {
-                    panic!("{label} rejected:\n{message}");
+                // Both systems' configs: `check` validates the schema on any
+                // system, so the macOS shape is covered on Windows too.
+                for os in [Os::Windows, Os::MacOs] {
+                    let input = BuildInput { os, ..input };
+                    let path = dir.path().join(format!("case-{case}-{os:?}.json"));
+                    write_config(&build_config(&input), &path).unwrap();
+                    let label = format!("case {case} ({kind:?}, {mode:?}, {} targets, {os:?})", targets.domains.len());
+                    if let Err(message) = core.check(&path) {
+                        panic!("{label} rejected:\n{message}");
+                    }
+                    // A deprecation today is a startup failure two releases later;
+                    // fail here while the migration note is still current.
+                    let output = Command::new(&executable).arg("check").arg("-c").arg(&path).output().unwrap();
+                    let text = String::from_utf8_lossy(&output.stderr).to_lowercase();
+                    assert!(!text.contains("deprecated"), "{label} uses a deprecated option:\n{text}");
                 }
-                // A deprecation today is a startup failure two releases later;
-                // fail here while the migration note is still current.
-                let output = Command::new(&executable).arg("check").arg("-c").arg(&path).output().unwrap();
-                let text = String::from_utf8_lossy(&output.stderr).to_lowercase();
-                assert!(!text.contains("deprecated"), "{label} uses a deprecated option:\n{text}");
             }
         }
     }

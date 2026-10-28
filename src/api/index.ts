@@ -36,9 +36,11 @@ export const api = {
   runDiagnostics: (intranet: string | null) => invoke<DiagnosticReport>("run_diagnostics", { intranet }),
   /** Resolves null when already up to date. A found release also lands in AppState.update. */
   checkUpdate: () => invoke<UpdateInfo | null>("check_update"),
-  /** Downloads and installs the found release. On Windows success never resolves: the app exits and reopens. */
+  /** Downloads and installs the found release. On success it never resolves: the app exits and reopens. */
   installUpdate: () => invoke<void>("install_update"),
   openReleases: () => invoke<void>("open_releases"),
+  /** macOS: stops routing and removes the background helper; the system asks for the password. */
+  removeHelper: () => invoke<AppState>("remove_helper"),
 };
 
 /** Backend pushes the full state whenever it changes on its own (core restart, upstream lost). */

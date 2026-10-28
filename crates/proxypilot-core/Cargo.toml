@@ -15,6 +15,14 @@ serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.151"
 url = "2.5.8"
 native-tls = "0.2.18"
+# The macOS helper checks the files it installs against the release key;
+# the same versions tauri-plugin-updater already pulls in.
+minisign-verify = "0.3.0"
+sha2 = "0.10.9"
+base64 = "0.22.1"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+libc = "0.2.191"
 
 [target.'cfg(windows)'.dependencies.windows-sys]
 version = "0.61.2"

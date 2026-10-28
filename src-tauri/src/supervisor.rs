@@ -2,14 +2,12 @@
 //! messages, so starting, stopping and restarting never race each other.
 
 use crate::state::{Msg, Shared, lock};
-use proxypilot_core::config::{BuildInput, RuntimePaths, build_config, write_config};
-use proxypilot_core::core::{CoreManager, SingBox};
+use proxypilot_core::backend::{ApplyRequest, Backend};
 use proxypilot_core::detect::{detect, upstream_owner};
 use proxypilot_core::envcheck::{EnvInput, evaluate};
 use proxypilot_core::probe::upstream_alive;
 use proxypilot_core::traffic::fetch_connections;
 use proxypilot_core::*;
-use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::mpsc::{Receiver, RecvTimeoutError};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -25,7 +23,8 @@ const STABLE_AFTER: Duration = Duration::from_secs(300);
 
 struct Supervisor {
     shared: Arc<Shared>,
-    core: Option<CoreManager>,
+    /// None when the install is missing sing-box (or, on macOS, the helper files).
+    core: Option<Box<dyn Backend>>,
     pending_apply: Option<Instant>,
     restart_at: Option<Instant>,
     failures: usize,
@@ -39,10 +38,7 @@ pub fn spawn(shared: Arc<Shared>, rx: Receiver<Msg>) {
     std::thread::Builder::new()
         .name("supervisor".into())
         .spawn(move || {
-            let core = shared.core_exe.clone().map(|exe: PathBuf| {
-                let ready = Box::new(|| proxypilot_core::sys::interface_up(proxypilot_core::config::INTERFACE_NAME));
-                CoreManager::new(Box::new(SingBox::new(exe)), RuntimePaths::new(&shared.paths.runtime), ready)
-            });
+            let core = backend(&shared);
             if shared.clash_api.is_none() {
                 shared.log("无法生成 Clash API 端口");
             }
@@ -60,6 +56,15 @@ pub fn spawn(shared: Arc<Shared>, rx: Receiver<Msg>) {
             supervisor.run(rx);
         })
         .expect("cannot start supervisor thread");
+}
+
+/// sing-box in this elevated process on Windows; the root helper on macOS.
+fn backend(shared: &Shared) -> Option<Box<dyn Backend>> {
+    let _exe = shared.core_exe.clone()?;
+    #[cfg(target_os = "macos")]
+    return Some(Box::new(crate::helper_client::HelperBackend::new(shared.version.clone())));
+    #[cfg(not(target_os = "macos"))]
+    return Some(Box::new(proxypilot_core::backend::LocalBackend::new(_exe, &shared.paths.runtime)));
 }
 
 fn now_ms() -> u64 {
@@ -128,12 +133,17 @@ impl Supervisor {
             self.stop();
             return;
         }
+        let ready = self.can_route();
         let failure = if self.core.is_none() {
             Some("缺少 sing-box 核心，请重新安装")
         } else if self.shared.unprotected.is_some() {
             Some(crate::paths::UNPROTECTED)
-        } else if !self.shared.elevated {
-            Some("没有管理员权限，无法创建分流用的虚拟网卡")
+        } else if !ready {
+            Some(if cfg!(target_os = "macos") {
+                "后台助手不可用，请把分流开关关掉再打开，按提示输入密码安装"
+            } else {
+                "没有管理员权限，无法创建分流用的虚拟网卡"
+            })
         } else if settings.upstream.is_none() {
             Some("还没有选择代理端口")
         } else if self.shared.clash_api.is_none() {
@@ -153,14 +163,7 @@ impl Supervisor {
 
         let owner = upstream_owner(&upstream).and_then(|(_, name)| name);
         let targets = settings.targets();
-        let (candidate, log) = (core.paths().candidate.clone(), core.paths().log.clone());
-        let input = BuildInput::from_settings(&settings, &upstream, &targets, owner.as_deref(), &log, api);
-        if let Err(error) = write_config(&build_config(&input), &candidate) {
-            set_core(&self.shared, CoreStatus::Failed, &format!("无法写入配置：{error}"), None);
-            self.shared.emit();
-            return;
-        }
-        let outcome = core.apply(&candidate);
+        let outcome = core.apply(&ApplyRequest::from_settings(&settings, &upstream, owner.as_deref(), api));
         let pid = core.pid();
         if outcome.ok {
             self.started_at = Some(Instant::now());
@@ -254,6 +257,14 @@ impl Supervisor {
         }
     }
 
+    /// Whether a TUN can be created: the process's own rights on Windows; on
+    /// macOS, the helper (connecting may upgrade it). Remembered for the UI.
+    fn can_route(&mut self) -> bool {
+        let ready = self.shared.elevated && self.core.as_mut().is_some_and(|core| core.ready());
+        self.shared.set_can_route(ready);
+        ready
+    }
+
     fn check_health(&mut self) {
         let upstream = lock(&self.shared.settings).upstream.clone();
         let mut alive = upstream.as_ref().is_some_and(|up| upstream_alive(up, ALIVE_TIMEOUT));
@@ -271,7 +282,9 @@ impl Supervisor {
             }
         }
         let ours = self.core.as_ref().is_some_and(|core| core.may_own_adapter());
+        let ready = self.can_route();
         let env = evaluate(&EnvInput::gather(
+            ready,
             self.shared.core_exe.is_some(),
             self.shared.unprotected.is_some(),
             upstream.is_some(),

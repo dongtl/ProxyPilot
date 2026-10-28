@@ -13,7 +13,16 @@ pub struct TrayHandles {
     icon: TrayIcon<Wry>,
 }
 
+/// macOS: a Dock icon only while the window is open; the menu bar item stays.
+pub fn set_dock(app: &AppHandle, visible: bool) {
+    #[cfg(target_os = "macos")]
+    let _ = app.set_activation_policy(if visible { tauri::ActivationPolicy::Regular } else { tauri::ActivationPolicy::Accessory });
+    #[cfg(not(target_os = "macos"))]
+    let _ = (app, visible);
+}
+
 pub fn show_main(app: &AppHandle) {
+    set_dock(app, true);
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.unminimize();
         let _ = window.show();
@@ -51,7 +60,10 @@ pub fn build(app: &AppHandle, shared: &Arc<Shared>) -> tauri::Result<()> {
     let quit_item = MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?;
     let separator = PredefinedMenuItem::separator(app)?;
     let menu = Menu::with_items(app, &[&toggle, &open, &separator, &quit_item])?;
-    let mut builder = TrayIconBuilder::with_id("main").tooltip("ProxyPilot").menu(&menu).show_menu_on_left_click(false);
+    // macOS menu bar items open their menu on a click; Windows tray icons
+    // open the window and keep the menu for the right button.
+    let mut builder =
+        TrayIconBuilder::with_id("main").tooltip("ProxyPilot").menu(&menu).show_menu_on_left_click(cfg!(target_os = "macos"));
     if let Some(icon) = app.default_window_icon() {
         builder = builder.icon(icon.clone());
     }

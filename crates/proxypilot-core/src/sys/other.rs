@@ -21,6 +21,10 @@ pub fn interfaces() -> io::Result<Vec<InterfaceInfo>> {
     Ok(Vec::new())
 }
 
+pub fn has_address(_ip: std::net::IpAddr) -> bool {
+    false
+}
+
 pub fn is_elevated() -> bool {
     false
 }

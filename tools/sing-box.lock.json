@@ -3,5 +3,16 @@
     "asset":  "sing-box-1.14.4-windows-amd64.zip",
     "url":  "https://github.com/SagerNet/sing-box/releases/download/v1.14.4/sing-box-1.14.4-windows-amd64.zip",
     "source":  "https://github.com/SagerNet/sing-box/tree/v1.14.4",
-    "sha256":  "99185d75d314a07dbba4a130c8ad986cbeb629a07927975636b341ca61f991df"
+    "sha256":  "99185d75d314a07dbba4a130c8ad986cbeb629a07927975636b341ca61f991df",
+    "darwin":  {
+        "note":  "Built from source by scripts/build-macos-helper.sh: the official darwin assets require macOS 26.",
+        "repository":  "https://github.com/SagerNet/sing-box.git",
+        "commit":  "c005f35300ce76427dc285481ec5695f5b179cd2",
+        "go":  "1.26.10",
+        "go_sha256_arm64":  "0b5183492292ada170f9b561a834863808dd02edba599e4ad0e89899330020b3",
+        "go_sha256_amd64":  "e820ab780c273ae4a340b79d0f3c4313b74ee029aa3874792145d44b9f4f91da",
+        "deployment_target":  "12.0",
+        "tags":  "with_clash_api,badlinkname,tfogo_checklinkname0",
+        "ldflags":  "-X runtime.godebugDefault=multipathtcp=0,tlssha1=1 -checklinkname=0"
+    }
 }

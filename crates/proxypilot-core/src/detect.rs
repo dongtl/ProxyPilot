@@ -42,8 +42,7 @@ pub fn listeners() -> Vec<Listener> {
 pub fn select_targets(listeners: &[Listener], full: bool, exclude: &[u32]) -> Vec<(IpAddr, Listener)> {
     let mut by_port: HashMap<u16, (IpAddr, Listener)> = HashMap::new();
     for listener in listeners {
-        // 0 and 4 are the idle and System processes (SMB, HTTP.sys and such).
-        if listener.pid <= 4 || exclude.contains(&listener.pid) {
+        if sys::kernel_pid(listener.pid) || (listener.pid != 0 && exclude.contains(&listener.pid)) {
             continue;
         }
         let known = client_label(listener.process.as_deref()).1;
@@ -99,7 +98,8 @@ pub fn detect(full: bool, exclude: &[u32]) -> Vec<Candidate> {
                                 port: listener.port,
                                 host: ip.to_string(),
                                 process: listener.process.clone(),
-                                pid: Some(listener.pid),
+                                // 0: the owner is another user's process we cannot see.
+                                pid: (listener.pid != 0).then_some(listener.pid),
                                 client,
                                 status,
                                 known,
@@ -124,7 +124,7 @@ pub fn detect(full: bool, exclude: &[u32]) -> Vec<Candidate> {
 pub fn port_owner(port: u16) -> Option<(u32, Option<String>)> {
     listeners()
         .into_iter()
-        .find(|listener| listener.port == port && listener.pid > 4)
+        .find(|listener| listener.port == port && listener.pid != 0 && !sys::kernel_pid(listener.pid))
         .map(|listener| (listener.pid, listener.process))
 }
 

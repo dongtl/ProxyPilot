@@ -1,0 +1,2 @@
+# Shell scripts run on the macOS CI runner; a CRLF checkout would break them.
+*.sh text eol=lf

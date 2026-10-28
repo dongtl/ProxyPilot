@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "ProxyPilot",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "identifier": "app.proxypilot.desktop",
   "build": {
     "beforeDevCommand": "pnpm dev",
@@ -29,23 +29,14 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["nsis"],
     "publisher": "ProxyPilot",
     "shortDescription": "代理分流助手",
     "longDescription": "只让选中的应用和网站走本机代理，其余流量直连。",
     "license": "GPL-3.0-only",
-    "externalBin": ["binaries/sing-box"],
     "resources": {
       "../LICENSE": "licenses/LICENSE.txt",
       "resources/sing-box-LICENSE.txt": "licenses/sing-box-LICENSE.txt",
       "../THIRD_PARTY_NOTICES.md": "licenses/THIRD_PARTY_NOTICES.md"
-    },
-    "windows": {
-      "nsis": {
-        "installMode": "perMachine",
-        "installerHooks": "./windows/hooks.nsh",
-        "languages": ["SimpChinese", "English"]
-      }
     },
     "icon": [
       "icons/32x32.png",

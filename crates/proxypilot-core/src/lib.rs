@@ -6,6 +6,7 @@
 //! macOS shell arrives. Platform calls live in `sys`.
 
 pub mod acl;
+pub mod backend;
 pub mod catalog;
 pub mod config;
 pub mod core;
@@ -13,7 +14,9 @@ pub mod detect;
 pub mod diagnose;
 pub mod domain;
 pub mod envcheck;
+pub mod helper;
 pub mod model;
+pub mod platform;
 pub mod presets;
 pub mod probe;
 pub mod settings;

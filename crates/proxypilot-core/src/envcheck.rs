@@ -4,6 +4,7 @@
 use crate::catalog::running_vpn_clients;
 use crate::config::INTERFACE_NAME;
 use crate::model::{EnvFinding, FindingLevel};
+use crate::platform::Os;
 use crate::sys::{self, InterfaceInfo, SystemProxy};
 use std::collections::HashSet;
 
@@ -21,14 +22,20 @@ pub struct EnvInput {
     pub running: HashSet<String>,
     pub upstream_configured: bool,
     pub upstream_alive: bool,
-    /// Whether an adapter named like ours could be our own core's right now.
+    /// Whether an adapter that looks like ours could be our own core's right now.
     pub adapter_ours: bool,
+    /// Whether an adapter that looks like ours is up (see `sys::tun_present`).
+    pub tun_present: bool,
     /// Whether ordinary programs could change what we run elevated.
     pub install_unprotected: bool,
+    pub os: Os,
 }
 
 impl EnvInput {
+    /// `elevated`: whether a TUN can be created. On Windows that is the
+    /// app's own token; on macOS whether the background helper is ready.
     pub fn gather(
+        elevated: bool,
         core_present: bool,
         install_unprotected: bool,
         upstream_configured: bool,
@@ -36,7 +43,7 @@ impl EnvInput {
         adapter_ours: bool,
     ) -> EnvInput {
         EnvInput {
-            elevated: sys::is_elevated(),
+            elevated,
             core_present,
             install_unprotected,
             system_proxy: sys::system_proxy(),
@@ -45,6 +52,8 @@ impl EnvInput {
             upstream_configured,
             upstream_alive,
             adapter_ours,
+            tun_present: sys::tun_present(),
+            os: Os::CURRENT,
         }
     }
 }
@@ -79,12 +88,21 @@ pub fn evaluate(input: &EnvInput) -> Vec<EnvFinding> {
         ));
     }
     if !input.elevated {
-        out.push(finding(
-            "not_elevated",
-            FindingLevel::Error,
-            "没有管理员权限",
-            "创建分流用的虚拟网卡需要管理员权限。请右键 ProxyPilot，选择“以管理员身份运行”。".into(),
-        ));
+        out.push(match input.os {
+            Os::Windows => finding(
+                "not_elevated",
+                FindingLevel::Error,
+                "没有管理员权限",
+                "创建分流用的虚拟网卡需要管理员权限。请右键 ProxyPilot，选择“以管理员身份运行”。".into(),
+            ),
+            // Not an error: a fresh install is in this state until the first switch-on.
+            Os::MacOs => finding(
+                "not_elevated",
+                FindingLevel::Info,
+                "后台助手还没有装好",
+                "创建分流用的虚拟网卡需要管理员权限，由一个后台助手负责。打开分流开关时会请求一次开机密码来安装它，以后不用再输入。".into(),
+            ),
+        });
     }
     let proxy = &input.system_proxy;
     if (proxy.enabled && !proxy.server.is_empty()) || !proxy.auto_config_url.is_empty() {
@@ -105,6 +123,8 @@ pub fn evaluate(input: &EnvInput) -> Vec<EnvFinding> {
             ));
         }
     }
+    // macOS adapters are all `utunN` with no description, so another tool's
+    // TUN cannot be told apart there; the hints never match and nothing is said.
     let foreign: Vec<&str> = input
         .interfaces
         .iter()
@@ -128,13 +148,16 @@ pub fn evaluate(input: &EnvInput) -> Vec<EnvFinding> {
     }
     // Same name, not our core: an older ProxyPilot build, typically. sing-box
     // derives the adapter's identity from its name, so ours cannot be created.
-    let taken = !input.adapter_ours && input.interfaces.iter().any(|item| item.up && item.alias.eq_ignore_ascii_case(INTERFACE_NAME));
-    if taken {
+    if !input.adapter_ours && input.tun_present {
         out.push(finding(
             "adapter_taken",
             FindingLevel::Error,
             "ProxyPilot 虚拟网卡已被占用",
-            "另一个程序创建了同名的虚拟网卡，常见原因是旧版 ProxyPilot 还在运行。请右键托盘里旧版的图标退出它，分流会自动重试；没有恢复的话，把分流开关关掉再打开。".into(),
+            match input.os {
+                Os::Windows => "另一个程序创建了同名的虚拟网卡，常见原因是旧版 ProxyPilot 还在运行。请右键托盘里旧版的图标退出它，分流会自动重试；没有恢复的话，把分流开关关掉再打开。",
+                Os::MacOs => "另一个程序的虚拟网卡用了 ProxyPilot 的地址 172.19.0.1，常见原因是其它代理工具的 TUN 模式。请在那个工具里关闭 TUN，分流会自动重试；没有恢复的话，把分流开关关掉再打开。",
+            }
+            .into(),
         ));
     }
     if input.upstream_configured && !input.upstream_alive {
@@ -142,7 +165,7 @@ pub fn evaluate(input: &EnvInput) -> Vec<EnvFinding> {
             "upstream_down",
             FindingLevel::Warning,
             "代理客户端未运行",
-            "连不上选定的代理端口。请打开代理客户端；如果它换了端口，请在设置里重新选择。没选中的流量不受影响。".into(),
+            "连不上选定的代理端口。请打开代理客户端，FlClash 等客户端还要在首页点“启动”；如果它换了端口，请在设置里重新选择。没选中的流量不受影响。".into(),
         ));
     }
     let vpns = running_vpn_clients(&input.running);
@@ -172,7 +195,9 @@ mod tests {
             upstream_configured: true,
             upstream_alive: true,
             adapter_ours: true,
+            tun_present: false,
             install_unprotected: false,
+            os: Os::Windows,
         }
     }
 
@@ -211,13 +236,13 @@ mod tests {
     }
 
     #[test]
-    fn adapter_with_our_name_and_no_core_of_ours_is_reported() {
+    fn adapter_that_looks_like_ours_and_no_core_of_ours_is_reported() {
         let mut input = clean();
-        input.interfaces = vec![InterfaceInfo { alias: "ProxyPilot".into(), description: "sing-tun Tunnel".into(), up: true }];
+        input.tun_present = true;
         assert!(ids(&input).is_empty());
         input.adapter_ours = false;
         assert_eq!(ids(&input), vec!["adapter_taken"]);
-        input.interfaces[0].up = false;
+        input.tun_present = false;
         assert!(ids(&input).is_empty());
     }
 
@@ -227,8 +252,20 @@ mod tests {
         input.elevated = false;
         input.core_present = false;
         input.upstream_alive = false;
-        input.running.insert("atrust.exe".into());
+        input.running.insert(crate::platform::name_key("aTrust.exe"));
         assert_eq!(ids(&input), vec!["core_missing", "not_elevated", "upstream_down", "corporate_vpn"]);
+        assert_eq!(evaluate(&input)[1].level, FindingLevel::Error);
+    }
+
+    #[test]
+    fn missing_helper_on_macos_is_only_information() {
+        let mut input = clean();
+        input.os = Os::MacOs;
+        input.elevated = false;
+        let found = evaluate(&input);
+        assert_eq!(found[0].id, "not_elevated");
+        assert_eq!(found[0].level, FindingLevel::Info);
+        assert!(found[0].detail.contains("后台助手"));
     }
 
     #[test]

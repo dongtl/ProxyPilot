@@ -1,0 +1,16 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "bundle": {
+    "targets": ["app", "dmg"],
+    "resources": {
+      "binaries/macos/proxypilot-helper": "helper/proxypilot-helper",
+      "binaries/macos/sing-box": "helper/sing-box",
+      "binaries/macos/manifest.json": "helper/manifest.json",
+      "binaries/macos/manifest.json.sig": "helper/manifest.json.sig"
+    },
+    "macOS": {
+      "minimumSystemVersion": "12.0",
+      "signingIdentity": "-"
+    }
+  }
+}

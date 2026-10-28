@@ -97,7 +97,40 @@ mod imp {
     }
 }
 
-#[cfg(not(windows))]
+/// macOS: a LaunchAgent in the user's own Library. The app runs unprivileged,
+/// so no password is needed; the helper that needs root is a LaunchDaemon of
+/// its own. Removing the file takes effect at the next login and leaves the
+/// running app alone.
+#[cfg(target_os = "macos")]
+mod imp {
+    use std::path::PathBuf;
+
+    const LABEL: &str = "app.proxypilot.desktop";
+
+    fn plist_path() -> Result<PathBuf, String> {
+        let home = std::env::var_os("HOME").ok_or("找不到用户目录")?;
+        Ok(PathBuf::from(home).join("Library/LaunchAgents").join(format!("{LABEL}.plist")))
+    }
+
+    pub fn enable(_scratch_dir: &std::path::Path) -> Result<(), String> {
+        let exe = std::env::current_exe().map_err(|error| error.to_string())?;
+        let path = plist_path()?;
+        if let Some(dir) = path.parent() {
+            std::fs::create_dir_all(dir).map_err(|error| format!("无法设置开机自启：{error}"))?;
+        }
+        let plist = proxypilot_core::helper::launchd_plist(LABEL, &[&exe.to_string_lossy(), "--autostart"], false, None);
+        proxypilot_core::settings::write_atomic(&path, plist.as_bytes()).map_err(|error| format!("无法设置开机自启：{error}"))
+    }
+
+    pub fn disable() -> Result<(), String> {
+        match std::fs::remove_file(plist_path()?) {
+            Err(error) if error.kind() != std::io::ErrorKind::NotFound => Err(format!("无法取消开机自启：{error}")),
+            _ => Ok(()),
+        }
+    }
+}
+
+#[cfg(not(any(windows, target_os = "macos")))]
 mod imp {
     pub fn enable(_scratch_dir: &std::path::Path) -> Result<(), String> {
         Err("当前系统暂不支持开机自启".into())

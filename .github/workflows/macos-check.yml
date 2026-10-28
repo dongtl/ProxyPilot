@@ -1,0 +1,134 @@
+# macOS smoke test, for a maintainer without a Mac. On a GitHub macOS runner:
+# run the tests, build the app bundle the way a release does (but signed with
+# a throwaway key, never the update key), install the helper from the bundle,
+# turn routing on, check that only the chosen site goes through a local SOCKS
+# upstream, then uninstall and check that nothing is left behind.
+name: macOS check
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['crates/**', 'src-tauri/**', 'scripts/*.sh', 'tools/**', '.github/workflows/macos-check.yml']
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: macos-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24.13.0'
+
+      - name: Install pnpm, Rust and frontend dependencies
+        run: |
+          npm install --global pnpm@10.23.0
+          rustup toolchain install 1.99.1 --profile minimal --target aarch64-apple-darwin --target x86_64-apple-darwin
+          rustup default 1.99.1
+          pnpm install --frozen-lockfile
+
+      # The helper only trusts manifests signed with the key it is built with;
+      # here that is a key made for this run and thrown away with the runner.
+      - name: Make a throwaway signing key
+        run: |
+          pnpm tauri signer generate --ci -p smoke -w "$RUNNER_TEMP/smoke.key" > /dev/null
+          {
+            echo "TAURI_SIGNING_PRIVATE_KEY_PASSWORD=smoke"
+            echo "PROXYPILOT_TEST_RELEASE_KEY=$(cat "$RUNNER_TEMP/smoke.key.pub")"
+            echo "TAURI_SIGNING_PRIVATE_KEY<<KEY_END"
+            cat "$RUNNER_TEMP/smoke.key"
+            echo "KEY_END"
+          } >> "$GITHUB_ENV"
+
+      - name: Build sing-box and the helper
+        run: bash scripts/build-macos-helper.sh
+
+      - name: Rust tests (macOS)
+        env:
+          PROXYPILOT_SING_BOX: src-tauri/binaries/macos/sing-box
+        run: cargo test --workspace
+
+      - name: Build the app bundle
+        run: pnpm tauri build --target universal-apple-darwin --bundles app
+
+      - name: Check the bundle
+        run: |
+          app=target/universal-apple-darwin/release/bundle/macos/ProxyPilot.app
+          echo "APP=$PWD/$app" >> "$GITHUB_ENV"
+          codesign --verify --verbose "$app"
+          cd "$app/Contents/Resources/helper"
+          for file in proxypilot-helper sing-box; do
+            want=$(jq -r --arg f "$file" '.files[$f]' manifest.json)
+            have=$(shasum -a 256 "$file" | awk '{print $1}')
+            [ "$want" = "$have" ] || { echo "$file was changed by the bundler"; exit 1; }
+          done
+          lipo -archs proxypilot-helper sing-box
+
+      - name: Install the helper from the bundle
+        run: |
+          sudo "$APP/Contents/Resources/helper/proxypilot-helper" install --owner "$(id -u)" --from "$APP/Contents/Resources/helper"
+          sudo launchctl print system/app.proxypilot.helper | head -20
+          stat -f '%Su %Lp %N' /Library/PrivilegedHelperTools/app.proxypilot.helper/*
+
+      - name: Route one site through a local upstream
+        run: |
+          cat > "$RUNNER_TEMP/upstream.json" <<EOF
+          {"log": {"level": "info", "output": "$RUNNER_TEMP/upstream.log"},
+           "inbounds": [{"type": "socks", "listen": "127.0.0.1", "listen_port": 17890}],
+           "outbounds": [{"type": "direct"}]}
+          EOF
+          src-tauri/binaries/macos/sing-box run -c "$RUNNER_TEMP/upstream.json" &
+          sleep 2
+          cat > "$RUNNER_TEMP/check.sh" <<'EOF'
+          set -eu
+          log="$RUNNER_TEMP/upstream.log"
+          ifconfig | grep -q 'inet 172.19.0.1 ' || { echo "TUN is not up"; exit 1; }
+          count() { grep -c 'inbound connection' "$log" || true; }
+          n0=$(count)
+          curl -fsS --max-time 30 -o /dev/null https://www.apple.com
+          n1=$(count)
+          curl -fsS --max-time 30 -o /dev/null https://example.com
+          n2=$(count)
+          echo "upstream connections: $n0, after apple.com (direct) $n1, after example.com (proxied) $n2"
+          [ "$n1" = "$n0" ] && [ "$n2" -gt "$n1" ]
+          EOF
+          cargo run -q -p proxypilot-core --bin proxypilot-cli -- helper-run \
+            --upstream socks5://127.0.0.1:17890 --site example.com --command "bash $RUNNER_TEMP/check.sh"
+          sleep 3
+          ! ifconfig | grep -q 'inet 172.19.0.1 ' || { echo "TUN still up after stop"; exit 1; }
+
+      - name: Uninstall and check nothing is left
+        run: |
+          sudo /Library/PrivilegedHelperTools/app.proxypilot.helper/proxypilot-helper uninstall
+          test ! -e /Library/LaunchDaemons/app.proxypilot.helper.plist
+          test ! -e /Library/PrivilegedHelperTools/app.proxypilot.helper
+          test ! -e "/Library/Application Support/app.proxypilot.helper"
+          ! sudo launchctl print system/app.proxypilot.helper > /dev/null 2>&1
+
+      # A first start, as a tester gets it: the window opens without the helper
+      # installed, the app stays up, and nothing inside the signed bundle changes.
+      - name: Open the app
+        run: |
+          find "$APP" | sort > "$RUNNER_TEMP/bundle-before.txt"
+          open "$APP"
+          sleep 15
+          pgrep -f "ProxyPilot.app/Contents/MacOS/" > /dev/null || { echo "ProxyPilot quit right after starting"; exit 1; }
+          grep -F '启动 ' "$HOME/Library/Application Support/app.proxypilot.desktop/app.log" | tail -1
+          pkill -f "ProxyPilot.app/Contents/MacOS/" || true
+          sleep 3
+          find "$APP" | sort | diff "$RUNNER_TEMP/bundle-before.txt" - || { echo "the app wrote into its own bundle"; exit 1; }
+          codesign --verify --verbose "$APP"
+
+      - name: Logs
+        if: failure()
+        run: |
+          sudo sh -c 'tail -n 60 "/Library/Application Support/app.proxypilot.helper/"*.log' || true
+          tail -n 40 "$RUNNER_TEMP/upstream.log" || true
+          tail -n 40 "$HOME/Library/Application Support/app.proxypilot.desktop/app.log" || true

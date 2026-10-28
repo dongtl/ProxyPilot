@@ -28,9 +28,22 @@
 
 1. 把 `src-tauri/tauri.conf.json`、`package.json`、`Cargo.toml` 里的版本号改成同一个新版本，在 `CHANGELOG.md` 最上面写这个版本的更新内容。这段内容会显示在应用的更新提示里。
 2. 提交并推送，然后推送版本标签：`git tag v版本号`，`git push origin v版本号`。
-3. 等 Actions 跑完（约 20 分钟），Releases 里会出现一个草稿，带着安装包和 `latest.json`。下载安装包装一遍，确认没问题再点发布，不要勾选 Pre-release。
+3. 等 Actions 跑完（Windows 约 20 分钟，Mac 版要从源码编译 sing-box，大约 40 分钟），Releases 里会出现一个草稿，里面有这些文件：
+   - Windows 安装包；
+   - Mac 的 `.dmg` 和 `.app.tar.gz`；
+   - 两个系统共用的 `latest.json`。
+
+   下载 Windows 安装包装一遍，确认没问题再点发布，不要勾选 Pre-release。Mac 版构建失败不会挡住 Windows 版，草稿里只是少了 Mac 的文件，Actions 页面会有黄色提示。
 
 想先试试能不能打包，可以在 Actions 页面手动运行 Release，这样只上传文件，不建 Release。
+
+Mac 版没有真机也能检查：在 Actions 页面手动运行 macOS check。它在 GitHub 的 Mac 虚拟机上依次做这些事：
+- 运行测试；
+- 打包；
+- 安装后台助手，开启分流，确认只有选中的网站走代理；
+- 卸载，确认没有残留。
+
+它用一把临时生成的钥匙，不需要、也不会用到更新私钥。
 
 签名私钥和密码存在仓库的 Actions 密钥里：`TAURI_SIGNING_PRIVATE_KEY` 是 `proxypilot.key` 文件的全部内容，`TAURI_SIGNING_PRIVATE_KEY_PASSWORD` 是密码。公钥在 `tauri.conf.json` 的 `plugins.updater.pubkey` 里。不要重新生成钥匙，已安装的版本只认这一把；私钥不要放进仓库，并且要备份，私钥丢了，已安装的用户就再也收不到自动更新。
 

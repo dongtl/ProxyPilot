@@ -39,8 +39,12 @@ impl AppPaths {
 /// install folder, which only administrators can change: sing-box runs
 /// elevated, and a config ordinary programs could rewrite would let them have
 /// it write files anywhere. Dev builds keep them with the other data.
+/// macOS: the helper keeps sing-box's files in its own root-only folder, and
+/// the app bundle must stay untouched: writing into it breaks its signature,
+/// and run from the dmg it is read-only, so creating the folder would stop
+/// the app from starting.
 fn runtime_dir() -> Option<PathBuf> {
-    if cfg!(debug_assertions) {
+    if cfg!(debug_assertions) || !cfg!(windows) {
         return None;
     }
     Some(std::env::current_exe().ok()?.parent()?.join("runtime"))
@@ -64,7 +68,17 @@ pub fn unprotected(runtime: &Path, core: Option<&Path>) -> Option<PathBuf> {
 
 /// The bundled sing-box: next to our executable when installed (Tauri copies
 /// the sidecar there in dev too), or the fetched sidecar in a plain cargo run.
+/// On macOS the app never runs sing-box itself; this is the bundle's helper
+/// folder, which holds the helper and the sing-box it installs.
 pub fn find_core() -> Option<PathBuf> {
+    #[cfg(target_os = "macos")]
+    return crate::helper_client::bundled_dir();
+    #[cfg(not(target_os = "macos"))]
+    find_sidecar()
+}
+
+#[cfg(not(target_os = "macos"))]
+fn find_sidecar() -> Option<PathBuf> {
     if cfg!(debug_assertions)
         && let Some(path) = std::env::var_os("PROXYPILOT_SING_BOX") {
             return Some(PathBuf::from(path));

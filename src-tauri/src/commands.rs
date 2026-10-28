@@ -84,6 +84,14 @@ pub fn set_routing_now(shared: &Shared, enabled: bool) -> Cmd<AppState> {
     if enabled && lock(&shared.settings).upstream.is_none() {
         return Err("请先选择代理端口".into());
     }
+    // macOS: the user just switched routing on, the one moment a password
+    // prompt is expected. Install the helper, or reinstall one that is not working.
+    #[cfg(target_os = "macos")]
+    if enabled && !shared.can_route.load(std::sync::atomic::Ordering::Relaxed) {
+        shared.log("安装后台助手");
+        crate::helper_client::install().inspect_err(|error| shared.log(error))?;
+        shared.log("后台助手已安装");
+    }
     shared.update_settings(|settings| {
         settings.routing_enabled = enabled;
         Ok(())
@@ -133,27 +141,59 @@ const HIDDEN_PROCESSES: &[&str] = &[
 pub async fn list_processes(shared: State<'_, Arc<Shared>>) -> Cmd<Vec<RunningProcess>> {
     let direct = lock(&shared.settings).direct_processes.clone();
     blocking(move || {
+        use proxypilot_core::platform::{Os, is_user_program, name_key, program_of};
         let windows_dir = std::env::var("SystemRoot").unwrap_or_else(|_| r"C:\Windows".into()).to_lowercase();
-        let ours = std::env::current_exe().ok().and_then(|p| p.file_name().map(|n| n.to_string_lossy().to_lowercase()));
-        let mut skip: HashSet<String> = bypass_processes(&direct, None).iter().map(|n| n.to_lowercase()).collect();
-        skip.extend(HIDDEN_PROCESSES.iter().map(|n| (*n).to_owned()));
+        let ours = std::env::current_exe().ok().map(|p| name_key(&program_of(&p.to_string_lossy())));
+        let mut skip: HashSet<String> = bypass_processes(&direct, None).iter().map(|n| name_key(n)).collect();
+        skip.extend(HIDDEN_PROCESSES.iter().map(|n| name_key(n)));
         skip.extend(ours);
         let mut seen = HashSet::new();
         let mut out = Vec::new();
         for process in sys::processes().unwrap_or_default() {
-            let key = process.name.to_lowercase();
-            if process.pid <= 4 || skip.contains(&key) || !seen.insert(key) {
+            if sys::kernel_pid(process.pid) || process.pid == 0 {
                 continue;
             }
             // No path means a protected system process.
             let Some(path) = sys::process_path(process.pid) else { continue };
-            if path.to_lowercase().starts_with(&windows_dir) {
+            if (Os::CURRENT == Os::Windows && path.to_lowercase().starts_with(&windows_dir)) || !is_user_program(&path, Os::CURRENT) {
                 continue;
             }
-            out.push(RunningProcess { name: process.name, path: Some(path) });
+            // On macOS one entry per app, however many helper processes it runs.
+            let name = program_of(&path);
+            let key = name_key(&name);
+            if name.is_empty() || skip.contains(&key) || !seen.insert(key) {
+                continue;
+            }
+            out.push(RunningProcess { name, path: Some(path) });
         }
         out.sort_by_key(|p| p.name.to_lowercase());
         Ok(out)
+    })
+    .await
+}
+
+/// macOS: stop routing and remove the background helper. Asks for the password.
+#[tauri::command]
+pub async fn remove_helper(shared: State<'_, Arc<Shared>>) -> Cmd<AppState> {
+    let shared = shared.inner().clone();
+    blocking(move || {
+        #[cfg(target_os = "macos")]
+        {
+            if lock(&shared.settings).routing_enabled {
+                set_routing_now(&shared, false)?;
+            }
+            crate::helper_client::uninstall()?;
+            shared.set_can_route(false);
+            shared.log("已移除后台助手");
+            let _ = shared.tx.send(crate::state::Msg::Check);
+            shared.emit();
+            Ok(shared.snapshot())
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            let _ = shared;
+            Err("只有 macOS 版有后台助手".into())
+        }
     })
     .await
 }

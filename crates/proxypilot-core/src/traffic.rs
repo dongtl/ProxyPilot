@@ -44,11 +44,11 @@ fn field(metadata: &HashMap<String, Value>, key: &str) -> String {
     }
 }
 
-/// File name of a process path, empty when unknown. sing-box may append
-/// " (user)" on some systems.
+/// The program behind a process path, empty when unknown: its file name, or
+/// on macOS the `.app` it runs from, so a row for "Code Helper" offers to
+/// route Visual Studio Code rather than one helper process.
 fn process_name(path: &str) -> String {
-    let path = path.split(" (").next().unwrap_or(path).trim();
-    path.rsplit(['\\', '/']).next().unwrap_or(path).to_owned()
+    crate::platform::program_of(path)
 }
 
 pub fn parse_connections(body: &str) -> Result<Vec<Connection>, String> {

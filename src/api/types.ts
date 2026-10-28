@@ -70,11 +70,18 @@ export interface AppState {
   checkUpdates: boolean;
   /** A newer release found by the last check, waiting for the user; null when none. */
   update: UpdateInfo | null;
+  /** Whether a TUN can be created: administrator rights on Windows, a ready background helper on macOS. */
   elevated: boolean;
+  /** Decides wording and macOS-only settings. */
+  platform: Platform;
+  /** macOS: whether the background helper is installed. Always false on Windows. */
+  helperInstalled: boolean;
   env: EnvFinding[];
   dataDir: string;
   version: string;
 }
+
+export type Platform = "windows" | "macos";
 
 export interface UpdateInfo {
   version: string;

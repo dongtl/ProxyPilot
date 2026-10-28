@@ -2738,8 +2738,9 @@ dependencies = [
 
 [[package]]
 name = "proxypilot-app"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
+ "libc",
  "proxypilot-core",
  "reqwest",
  "serde",
@@ -2754,14 +2755,26 @@ dependencies = [
 
 [[package]]
 name = "proxypilot-core"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
+ "base64 0.22.1",
+ "libc",
+ "minisign-verify",
  "native-tls",
  "serde",
  "serde_json",
+ "sha2",
  "tempfile",
  "url",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "proxypilot-helper"
+version = "0.3.0"
+dependencies = [
+ "libc",
+ "proxypilot-core",
 ]
 
 [[package]]

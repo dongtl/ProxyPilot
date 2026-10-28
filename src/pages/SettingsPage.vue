@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, useId } from "vue";
-import { NAlert, NButton, NFlex, NSwitch, NText, useMessage } from "naive-ui";
+import { NAlert, NButton, NFlex, NPopconfirm, NSwitch, NTag, NText, useMessage } from "naive-ui";
 import type { AppState, DnsMode, LogLevel } from "../api";
 import { t } from "../i18n";
 import { actions } from "../store";
@@ -17,6 +17,7 @@ defineProps<{ state: AppState }>();
 const message = useMessage();
 const autostartHeadingId = useId();
 const autostartPending = ref(false);
+const helperPending = ref(false);
 
 const dnsOptions: { value: DnsMode; label: string; hint: string }[] = [
   { value: "encrypted", label: t.settings.dnsEncrypted, hint: t.settings.dnsEncryptedHint },
@@ -39,6 +40,13 @@ async function setAutostart(autostart: boolean) {
   if (await actions.updateSettings({ autostart })) message.success(t.settings.saved);
   autostartPending.value = false;
 }
+
+// macOS only: the system asks for the password, so this can take a while.
+async function removeHelper() {
+  helperPending.value = true;
+  if (await actions.removeHelper()) message.success(t.settings.helperRemoved);
+  helperPending.value = false;
+}
 </script>
 
 <template>
@@ -51,7 +59,7 @@ async function setAutostart(autostart: boolean) {
       :title="t.settings.directTitle"
       :hint="t.settings.directHint"
       :label="t.settings.directLabel"
-      :placeholder="t.settings.directPlaceholder"
+      :placeholder="state.platform === 'macos' ? t.settings.directPlaceholderMac : t.settings.directPlaceholder"
       :empty-text="t.settings.directEmpty"
       :items="state.directProcesses"
       :normalize="normalizeProcessName"
@@ -79,13 +87,28 @@ async function setAutostart(autostart: boolean) {
 
     <SectionCard :title="t.settings.autostartTitle" :heading-id="autostartHeadingId">
       <NFlex align="center" justify="space-between" :wrap="false">
-        <NText depth="3">{{ t.settings.autostartHint }}</NText>
+        <NText depth="3">{{ state.platform === "macos" ? t.settings.autostartHintMac : t.settings.autostartHint }}</NText>
         <NSwitch
           :value="state.autostart"
           :loading="autostartPending"
           :aria-labelledby="autostartHeadingId"
           @update:value="setAutostart"
         />
+      </NFlex>
+    </SectionCard>
+
+    <SectionCard v-if="state.platform === 'macos'" :title="t.settings.helperTitle">
+      <NText depth="3" tag="p" class="hint">{{ t.settings.helperHint }}</NText>
+      <NFlex align="center" justify="space-between">
+        <NTag :type="state.helperInstalled ? 'success' : 'default'" size="small">
+          {{ state.helperInstalled ? t.settings.helperInstalled : t.settings.helperMissing }}
+        </NTag>
+        <NPopconfirm v-if="state.helperInstalled" @positive-click="removeHelper">
+          <template #trigger>
+            <NButton :loading="helperPending">{{ t.settings.helperRemove }}</NButton>
+          </template>
+          {{ t.settings.helperRemoveConfirm }}
+        </NPopconfirm>
       </NFlex>
     </SectionCard>
 

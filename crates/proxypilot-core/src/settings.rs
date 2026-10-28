@@ -196,26 +196,31 @@ impl Settings {
         Ok(domain)
     }
 
-    /// Add an app by executable name. A full path is reduced to its file name,
-    /// because that is what sing-box matches on.
+    /// Add an app by executable name, or on macOS by `.app` bundle. A full
+    /// path is reduced to what the rules match on: the file name, or the
+    /// bundle the path lies in.
     pub fn add_app(&mut self, input: &str) -> Result<String, String> {
-        let name = input.trim().rsplit(['\\', '/']).next().unwrap_or("").trim().to_owned();
+        let name = crate::platform::program_of(input.trim().trim_end_matches('/')).trim().to_owned();
         if name.is_empty() {
             return Err("请选择一个程序".into());
         }
-        if catalog::bypass_processes(&self.direct_processes, None).iter().any(|bypass| bypass.eq_ignore_ascii_case(&name)) {
-            return Err(format!("{name} 是代理客户端、企业 VPN 或直连名单里的程序，它的流量必须直连，不能走代理"));
+        let key = crate::platform::name_key(&name);
+        if catalog::bypass_processes(&self.direct_processes, None).iter().any(|bypass| crate::platform::name_key(bypass) == key) {
+            return Err(format!(
+                "{} 是代理客户端、企业 VPN 或直连名单里的程序，它的流量必须直连，不能走代理",
+                crate::platform::display_name(&name)
+            ));
         }
         if let Some(existing) = self
             .custom_profiles
             .iter_mut()
-            .find(|custom| custom.processes.iter().any(|process| process.eq_ignore_ascii_case(&name)))
+            .find(|custom| custom.processes.iter().any(|process| crate::platform::name_key(process) == key))
         {
             existing.enabled = true;
             return Ok(name);
         }
         let id = self.next_custom_id();
-        let label = name.strip_suffix(".exe").or_else(|| name.strip_suffix(".EXE")).unwrap_or(&name).to_owned();
+        let label = crate::platform::display_name(&name);
         self.custom_profiles.push(CustomProfile {
             id,
             name: label,
@@ -393,6 +398,20 @@ mod tests {
         assert!(settings.add_app("aTrust.exe").is_err());
         settings.direct_processes = vec!["Corp.exe".into()];
         assert!(settings.add_app("corp.EXE").is_err());
+        // macOS names of the same programs.
+        assert!(settings.add_app("xray").is_err());
+        assert!(settings.add_app("/Applications/aTrust.app/").is_err());
+    }
+
+    #[test]
+    fn macos_apps_are_added_as_bundles() {
+        let mut settings = Settings::default();
+        assert_eq!(settings.add_app("/Applications/Visual Studio Code.app/").unwrap(), "Visual Studio Code.app");
+        assert_eq!(settings.custom_profiles[0].name, "Visual Studio Code");
+        let helper = "/Applications/Visual Studio Code.app/Contents/Frameworks/Code Helper.app/Contents/MacOS/Code Helper";
+        assert_eq!(settings.add_app(helper).unwrap(), "Visual Studio Code.app");
+        assert_eq!(settings.custom_profiles.len(), 1);
+        assert_eq!(settings.add_app("/opt/homebrew/bin/codex").unwrap(), "codex");
     }
 
     #[test]

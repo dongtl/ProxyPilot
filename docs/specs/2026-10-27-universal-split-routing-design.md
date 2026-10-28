@@ -207,6 +207,14 @@ IPv6：旧版 TUN 只有 IPv4 地址，IPv6 流量可能绕过 TUN。新版给 T
 | `check_update` | 无 | `UpdateInfo \| null`（null 表示已是最新） |
 | `install_update` | 无 | 无（Windows 上成功时应用直接退出，由安装程序重新打开） |
 | `open_releases` | 无 | 无 |
+| `remove_helper` | 无 | `AppState`（仅 macOS：关闭分流并移除后台助手，系统会要求输入密码） |
+
+`AppState` 里有两个字段和 macOS 有关：
+
+- `platform`（`windows` / `macos`）：用来区分文案。
+- `helperInstalled`：macOS 后台助手是否已安装。
+
+另外，macOS 上的 `elevated` 表示后台助手可用。
 
 后端状态变化时（核心启停、上游掉线或恢复、规则应用完成、发现新版本）推送 `state-changed` 事件，载荷是完整的 `AppState`。下载更新时推送 `update-progress`，载荷是 `UpdateProgress`。
 
@@ -248,7 +256,7 @@ IPv6：旧版 TUN 只有 IPv4 地址，IPv6 流量可能绕过 TUN。新版给 T
 - Phase 1：Windows MVP，即上面模块 1 到 9。验收标准：在一台没装过本工具的电脑上，装好 v2rayN 或 Clash Verge Rev 后，不编辑任何文件就能完成三步设置并正常分流。
 - Phase 2：安装包（NSIS）、代码签名、规则包（rule-set）、HTTP 上游自动识别、多语言。
 - Phase 3：服务模式（界面不再需要管理员权限）、只读客户端适配器（从客户端配置里读端口）、自动更新（0.2 已完成）。
-- Phase 4：macOS。手机端到时另行评估：Android 同一时间只允许一个 VPN 应用，iOS 基本不可行。
+- Phase 4：macOS，0.3 起为测试版，设计见 `2026-10-28-macos-design.md`。手机端到时另行评估：Android 同一时间只允许一个 VPN 应用，iOS 基本不可行。
 
 ## 与旧项目的关系
 
