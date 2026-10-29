@@ -28,7 +28,8 @@ ldflags=$(pick .darwin.ldflags)
 app_version=$(jq -r .version src-tauri/tauri.conf.json)
 : "${TAURI_SIGNING_PRIVATE_KEY:?缺少 TAURI_SIGNING_PRIVATE_KEY}"
 
-mkdir -p "$work" "$out"
+# resources/ holds only the gitignored license, so a fresh checkout lacks it.
+mkdir -p "$work" "$out" "$root/src-tauri/resources"
 
 # --- Go toolchain, checked against the pinned SHA256 -----------------------
 case "$(uname -m)" in
