@@ -75,7 +75,9 @@ jobs:
             have=$(shasum -a 256 "$file" | awk '{print $1}')
             [ "$want" = "$have" ] || { echo "$file was changed by the bundler"; exit 1; }
           done
-          lipo -archs proxypilot-helper sing-box
+          for file in proxypilot-helper sing-box; do
+            lipo -verify_arch arm64 x86_64 "$file" || { echo "$file is not universal: $(lipo -archs "$file")"; exit 1; }
+          done
 
       - name: Install the helper from the bundle
         run: |
