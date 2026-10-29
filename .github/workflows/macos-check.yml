@@ -55,10 +55,11 @@ jobs:
         run: bash scripts/build-macos-helper.sh
 
       # Absolute: cargo runs each test from its own crate's folder.
+      # --no-fail-fast: every failing test shows up in one run.
       - name: Rust tests (macOS)
         env:
           PROXYPILOT_SING_BOX: ${{ github.workspace }}/src-tauri/binaries/macos/sing-box
-        run: cargo test --workspace
+        run: cargo test --workspace --no-fail-fast
 
       - name: Build the app bundle
         run: pnpm tauri build --target universal-apple-darwin --bundles app

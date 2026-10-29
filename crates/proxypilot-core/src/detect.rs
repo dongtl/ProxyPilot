@@ -159,7 +159,9 @@ mod tests {
         let ports: Vec<u16> = select_targets(&all, false, &[]).iter().map(|(_, l)| l.port).collect();
         assert_eq!(ports, vec![7890, 10808, 30000]);
         let ports: Vec<u16> = select_targets(&all, true, &[]).iter().map(|(_, l)| l.port).collect();
-        assert_eq!(ports, vec![5432, 7890, 10808, 30000]);
+        // pid 4 is Windows' System process; elsewhere it is an ordinary program.
+        let full = if cfg!(windows) { vec![5432, 7890, 10808, 30000] } else { vec![445, 5432, 7890, 10808, 30000] };
+        assert_eq!(ports, full);
     }
 
     #[test]

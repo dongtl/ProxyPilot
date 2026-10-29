@@ -55,9 +55,11 @@ fn generated_configs_pass_sing_box_check() {
                     clash_api: &api,
                     os: Os::CURRENT,
                 };
-                // Both systems' configs: `check` validates the schema on any
-                // system, so the macOS shape is covered on Windows too.
-                for os in [Os::Windows, Os::MacOs] {
+                // Windows checks both shapes, so the macOS one is covered
+                // there too. Elsewhere only the macOS shape: the Windows one
+                // names its TUN, which a darwin sing-box may refuse.
+                let shapes: &[Os] = if cfg!(windows) { &[Os::Windows, Os::MacOs] } else { &[Os::MacOs] };
+                for &os in shapes {
                     let input = BuildInput { os, ..input };
                     let path = dir.path().join(format!("case-{case}-{os:?}.json"));
                     write_config(&build_config(&input), &path).unwrap();
