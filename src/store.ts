@@ -21,6 +21,7 @@ const bootError = ref<string | null>(null);
 const installing = ref(false);
 const progress = ref<UpdateProgress | null>(null);
 const dismissedVersion = ref<string | null>(null);
+const relocating = ref(false);
 
 export const appState = computed(() => state.value);
 /** For wording and macOS-only settings. False until the first state arrives. */
@@ -28,6 +29,7 @@ export const isMac = computed(() => state.value?.platform === "macos");
 export const loadError = computed(() => bootError.value);
 export const updateInstalling = computed(() => installing.value);
 export const updateProgress = computed(() => progress.value);
+export const relocateBusy = computed(() => relocating.value);
 /** The found release, unless the user chose "later" for this version on the banner. */
 export const updateBanner = computed(() => {
   const update = state.value?.update ?? null;
@@ -109,6 +111,18 @@ async function installUpdate(): Promise<void> {
   }
 }
 
+/** On success the app quits and the copy in Applications opens, so the button just keeps spinning. */
+async function relocate(): Promise<void> {
+  if (relocating.value) return;
+  relocating.value = true;
+  try {
+    await api.relocate();
+  } catch (err) {
+    notifyError(errorText(err));
+    relocating.value = false;
+  }
+}
+
 /** Runs a command that returns AppState. Resolves true on success; errors are toasted. */
 async function apply(call: () => Promise<AppState>): Promise<boolean> {
   try {
@@ -147,6 +161,7 @@ export const actions = {
   runDiagnostics: (intranet: string | null) => query(() => api.runDiagnostics(intranet)),
   checkUpdate,
   installUpdate,
+  relocate,
   dismissUpdate: (version: string) => {
     dismissedVersion.value = version;
   },

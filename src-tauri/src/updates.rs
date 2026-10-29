@@ -102,6 +102,69 @@ fn describe(error: &Error) -> String {
     }
 }
 
+/// macOS: the running copy cannot be replaced where it is.
+const OPENED_IN_PLACE: &str = "ProxyPilot 现在是从磁盘映像或下载文件夹里直接打开的，没法就地更新。\
+    请先点窗口顶部的“移到应用程序文件夹”，重新打开后再更新";
+
+/// After the download and signature check passed, what failed is replacing
+/// the program files, which has nothing to do with the network.
+fn describe_install(error: &Error) -> String {
+    match error {
+        Error::Minisign(_) | Error::SignedVersionMismatch { .. } | Error::MissingSignedVersion => describe(error),
+        Error::PreviousAppNotRestored(kept) => format!(
+            "更新没有完成，原来的 ProxyPilot 被留在了 {}。请把它拖回“应用程序”文件夹，或到发布页重新下载安装",
+            kept.display()
+        ),
+        _ if cfg!(target_os = "macos") => "新版本已下载并通过校验，但替换程序文件没有成功：可能是没有输入密码，\
+            或系统不允许修改“应用程序”里的 ProxyPilot。可以到发布页下载 dmg，退出 ProxyPilot 后拖进“应用程序”替换"
+            .into(),
+        other => format!("新版本已下载并通过校验，但安装没有成功：{other}。可以到发布页下载安装包手动安装"),
+    }
+}
+
+/// Where a bundle lies, for the log, and whether an update can replace it there.
+/// Gatekeeper runs an app opened before it was moved from a random read-only
+/// folder (App Translocation); a disk image is read-only too.
+#[cfg(any(target_os = "macos", test))]
+fn classify_bundle(bundle: &str, read_only: bool) -> (&'static str, bool) {
+    let translocated = bundle.contains("/AppTranslocation/");
+    let place = if translocated {
+        "系统隔离的临时位置（App Translocation）"
+    } else if bundle.starts_with("/Volumes/") {
+        "磁盘映像或外接磁盘"
+    } else if bundle.starts_with("/Applications/") {
+        "“应用程序”文件夹"
+    } else {
+        "其它文件夹"
+    };
+    (place, !(translocated || read_only))
+}
+
+/// macOS: the running bundle's place and whether it can be replaced; `None`
+/// outside a bundle (a dev build).
+#[cfg(target_os = "macos")]
+fn bundle_place() -> Option<(&'static str, bool)> {
+    let bundle = crate::relocate::running_bundle()?;
+    let read_only = bundle.parent().is_some_and(read_only_fs);
+    Some(classify_bundle(&bundle.to_string_lossy(), read_only))
+}
+
+/// A read-only file system only: "permission denied" is what the updater's
+/// password prompt is for.
+#[cfg(target_os = "macos")]
+fn read_only_fs(dir: &std::path::Path) -> bool {
+    use std::os::unix::ffi::OsStrExt;
+    let Ok(path) = std::ffi::CString::new(dir.as_os_str().as_bytes()) else { return false };
+    let refused = unsafe { libc::access(path.as_ptr(), libc::W_OK) } != 0;
+    // Read errno right away, before anything else can change it.
+    refused && std::io::Error::last_os_error().raw_os_error() == Some(libc::EROFS)
+}
+
+#[cfg(not(target_os = "macos"))]
+fn bundle_place() -> Option<(&'static str, bool)> {
+    None
+}
+
 /// Stop routing and the tray before the installer replaces our files. The
 /// same steps as quitting from the tray, minus the exit, which the updater does.
 fn before_exit(shared: &Shared) {
@@ -181,6 +244,12 @@ pub async fn check(shared: &Arc<Shared>) -> Result<Option<UpdateInfo>, String> {
 /// install never returns: the app exits and the installer reopens it.
 pub async fn install(shared: &Arc<Shared>) -> Result<(), String> {
     let mut update = lock(&shared.update).clone().ok_or("请先检查更新")?;
+    // Refuse before a 20 MB download that could never be put in place.
+    let place = bundle_place();
+    if let Some((spot, false)) = place {
+        shared.log(&format!("没有更新：程序在{spot}，不能就地替换"));
+        return Err(OPENED_IN_PLACE.into());
+    }
     update.timeout = Some(DOWNLOAD_TIMEOUT);
     shared.log(&format!("开始下载新版本 {}", update.version));
     let app = shared.app.clone();
@@ -212,13 +281,14 @@ pub async fn install(shared: &Arc<Shared>) -> Result<(), String> {
             shared.app.restart();
         }
         Err(error) => {
-            shared.log(&format!("安装更新失败：{}", chain(&error)));
+            let place = place.map(|(place, _)| format!("（程序在{place}）")).unwrap_or_default();
+            shared.log(&format!("安装更新失败{place}：{}", chain(&error)));
             // If the exit hook already stopped the supervisor, this app can no
             // longer route; start over rather than linger half shut down.
             if shared.tx.send(Msg::Check).is_err() {
                 shared.app.restart();
             }
-            Err(describe(&error))
+            Err(describe_install(&error))
         }
     }
 }
@@ -242,4 +312,28 @@ pub fn spawn(shared: Arc<Shared>) {
             }
         })
         .expect("cannot start update thread");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn install_failures_are_not_reported_as_network_trouble() {
+        let denied = Error::Io(std::io::Error::new(std::io::ErrorKind::PermissionDenied, "Failed to move the new app into place"));
+        assert!(describe(&denied).contains("GitHub"));
+        assert!(!describe_install(&denied).contains("GitHub"));
+        let kept = Error::PreviousAppNotRestored("/Users/someone/ProxyPilot.app".into());
+        assert!(describe_install(&kept).contains("/Users/someone/ProxyPilot.app"));
+    }
+
+    #[test]
+    fn a_bundle_opened_from_the_disk_image_or_translocated_cannot_be_replaced() {
+        assert_eq!(classify_bundle("/Applications/ProxyPilot.app", false), ("“应用程序”文件夹", true));
+        let translocated = "/private/var/folders/x/T/AppTranslocation/1234/d/ProxyPilot.app";
+        assert!(!classify_bundle(translocated, true).1);
+        assert!(!classify_bundle("/Volumes/ProxyPilot/ProxyPilot.app", true).1);
+        // A writable external disk is fine.
+        assert!(classify_bundle("/Volumes/Data/Apps/ProxyPilot.app", false).1);
+    }
 }

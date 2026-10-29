@@ -306,6 +306,21 @@ export const zh = {
     launching: "正在启动安装…",
   },
 
+  relocate: {
+    moveTitle: "把 ProxyPilot 移到“应用程序”文件夹？",
+    moveBody:
+      "ProxyPilot 现在是从桌面或下载的磁盘映像里直接打开的，这样没法自动更新，开机自启也会失效。点“移过去”会自动搬到“应用程序”文件夹并重新打开，设置都会保留。如果弹出密码框，输入开机密码就行。",
+    moveButton: "移过去",
+    openTitle: "“应用程序”文件夹里已经有 ProxyPilot",
+    openBody: "你现在打开的是另外一份。点“打开它”会改用“应用程序”文件夹里的那一份，这一份会关掉。",
+    openButton: "打开它",
+    later: "以后再说",
+    bannerMove: "ProxyPilot 不在“应用程序”文件夹里，没法自动更新。",
+    bannerOpen: "这一份不是“应用程序”文件夹里的 ProxyPilot。",
+    bannerMoveButton: "移到应用程序文件夹",
+    bannerOpenButton: "打开那一份",
+  },
+
   about: {
     title: "关于",
     heading: (version: string) => `ProxyPilot 代理分流助手 · 版本 ${version}`,

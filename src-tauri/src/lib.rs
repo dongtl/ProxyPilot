@@ -6,6 +6,7 @@ mod commands;
 #[cfg(target_os = "macos")]
 mod helper_client;
 mod paths;
+mod relocate;
 mod state;
 mod supervisor;
 mod tray;
@@ -37,13 +38,16 @@ pub fn run() {
             let unprotected = paths::unprotected(&paths.runtime, core_exe.as_deref());
             // macOS: the helper holds the rights, checked by the supervisor.
             let elevated = cfg!(target_os = "macos") || proxypilot_core::sys::is_elevated();
+            let version = app.package_info().version.to_string();
+            let relocation = relocate::check(&version);
             let shared = Arc::new(Shared {
                 app: handle.clone(),
                 core_exe,
                 unprotected,
                 elevated,
                 can_route: std::sync::atomic::AtomicBool::new(elevated && !cfg!(target_os = "macos")),
-                version: app.package_info().version.to_string(),
+                version,
+                relocation,
                 settings: Mutex::new(settings),
                 runtime: Mutex::new(Runtime {
                     core_status: CoreStatus::Stopped,
@@ -67,6 +71,9 @@ pub fn run() {
             ));
             if let Some(note) = note {
                 shared.log(&note);
+            }
+            if shared.relocation.is_some() {
+                shared.log("程序不在“应用程序”文件夹里，窗口会提示移过去");
             }
             if let Some(path) = &shared.unprotected {
                 shared.log(&format!("安装目录权限不安全，普通程序可以修改 {}，已停用分流和开机自启", path.display()));
@@ -133,6 +140,7 @@ pub fn run() {
             commands::install_update,
             commands::open_releases,
             commands::remove_helper,
+            commands::relocate,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

@@ -61,6 +61,8 @@ pub struct AppState {
     pub platform: &'static str,
     /// macOS: whether the background helper is installed.
     pub helper_installed: bool,
+    /// macOS: offer to move to, or open the copy in, the Applications folder.
+    pub relocation: Option<crate::relocate::Relocation>,
     pub env: Vec<EnvFinding>,
     pub data_dir: String,
     pub version: String,
@@ -88,6 +90,8 @@ pub struct Shared {
     pub clash_api: Option<proxypilot_core::config::ClashApi>,
     /// The release the last check found, kept so installing does not ask GitHub again.
     pub update: Mutex<Option<tauri_plugin_updater::Update>>,
+    /// macOS: running outside the Applications folder; what the window offers.
+    pub relocation: Option<crate::relocate::Relocation>,
 }
 
 fn helper_installed() -> bool {
@@ -143,6 +147,7 @@ impl Shared {
             elevated: self.can_route.load(Ordering::Relaxed),
             platform: if cfg!(target_os = "macos") { "macos" } else { "windows" },
             helper_installed: helper_installed(),
+            relocation: self.relocation,
             env,
             data_dir: self.paths.data.to_string_lossy().into_owned(),
             version: self.version.clone(),

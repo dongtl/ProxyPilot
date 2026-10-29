@@ -157,12 +157,13 @@ fn applescript_string(text: &str) -> String {
 }
 
 /// Text for the shell's `'...'`.
-fn shell_quote(text: &str) -> String {
+pub(crate) fn shell_quote(text: &str) -> String {
     format!("'{}'", text.replace('\'', "'\\''"))
 }
 
-/// Run `command` as root after the system password prompt.
-fn run_as_admin(command: &str, prompt: &str) -> Result<(), String> {
+/// Run `command` as root after the system password prompt. `Err(None)`: the
+/// user cancelled the prompt; `Err(Some(text))`: it failed.
+pub(crate) fn admin_shell(command: &str, prompt: &str) -> Result<(), Option<String>> {
     let script = format!(
         "do shell script {} with prompt {} with administrator privileges",
         applescript_string(command),
@@ -173,15 +174,22 @@ fn run_as_admin(command: &str, prompt: &str) -> Result<(), String> {
         .arg(script)
         .stdin(Stdio::null())
         .output()
-        .map_err(|error| format!("无法请求管理员权限：{error}"))?;
+        .map_err(|error| Some(format!("无法请求管理员权限：{error}")))?;
     if output.status.success() {
         return Ok(());
     }
     let text = String::from_utf8_lossy(&output.stderr);
     if text.contains("-128") {
-        return Err("已取消：没有输入密码，分流没有开启".into());
+        return Err(None);
     }
-    Err(format!("安装后台助手失败：{}", text.trim()))
+    Err(Some(text.trim().to_owned()))
+}
+
+fn run_as_admin(command: &str, prompt: &str) -> Result<(), String> {
+    admin_shell(command, prompt).map_err(|error| match error {
+        None => "已取消：没有输入密码，分流没有开启".to_owned(),
+        Some(text) => format!("安装后台助手失败：{text}"),
+    })
 }
 
 fn owner_uid() -> u32 {

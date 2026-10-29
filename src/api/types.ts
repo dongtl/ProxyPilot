@@ -80,6 +80,11 @@ export interface AppState {
   platform: Platform;
   /** macOS: whether the background helper is installed. Always false on Windows. */
   helperInstalled: boolean;
+  /**
+   * macOS, running outside the Applications folder: "move" copies the app there,
+   * "openInstalled" opens the same-or-newer copy already there. Null otherwise.
+   */
+  relocation: "move" | "openInstalled" | null;
   env: EnvFinding[];
   dataDir: string;
   version: string;

@@ -42,6 +42,8 @@ export const api = {
   openReleases: () => invoke<void>("open_releases"),
   /** macOS: stops routing and removes the background helper; the system asks for the password. */
   removeHelper: () => invoke<AppState>("remove_helper"),
+  /** macOS: moves the app into Applications (or opens the copy there), then the app quits and reopens. */
+  relocate: () => invoke<void>("relocate"),
 };
 
 /** Backend pushes the full state whenever it changes on its own (core restart, upstream lost). */

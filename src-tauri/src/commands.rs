@@ -321,6 +321,24 @@ pub async fn install_update(shared: State<'_, Arc<Shared>>) -> Cmd<()> {
     crate::updates::install(shared.inner()).await
 }
 
+/// macOS: move into the Applications folder (or open the copy already there)
+/// and quit; the copy there opens once this process has gone.
+#[tauri::command]
+pub async fn relocate(shared: State<'_, Arc<Shared>>) -> Cmd<()> {
+    let shared = shared.inner().clone();
+    let offer = shared.relocation.ok_or("ProxyPilot 已经在“应用程序”文件夹里了")?;
+    blocking(move || {
+        crate::relocate::run(offer).inspect_err(|error| shared.log(error))?;
+        shared.log(match offer {
+            crate::relocate::Relocation::Move => "已移到“应用程序”文件夹，从那里重新打开",
+            crate::relocate::Relocation::OpenInstalled => "改为打开“应用程序”文件夹里的 ProxyPilot",
+        });
+        crate::tray::quit(shared);
+        Ok(())
+    })
+    .await
+}
+
 #[tauri::command]
 pub async fn open_releases() -> Cmd<()> {
     tauri_plugin_opener::open_url(crate::updates::RELEASES_URL, None::<&str>).map_err(|error| format!("无法打开浏览器：{error}"))

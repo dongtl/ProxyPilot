@@ -5,6 +5,7 @@ import { t } from "../i18n";
 import { appState, disposeStore, initStore, loadError, setErrorNotifier, updateBanner } from "../store";
 import { currentPage, goTo, type PageKey } from "../navigation";
 import UpdateBanner from "./UpdateBanner.vue";
+import RelocatePrompt from "./RelocatePrompt.vue";
 import HomePage from "../pages/HomePage.vue";
 import ProfilesPage from "../pages/ProfilesPage.vue";
 import ConnectionsPage from "../pages/ConnectionsPage.vue";
@@ -59,6 +60,7 @@ onBeforeUnmount(disposeStore);
 
     <main ref="mainEl" class="main" tabindex="-1">
       <div v-if="appState" class="content" :class="{ fill: currentPage === 'connections' }">
+        <RelocatePrompt v-if="appState.relocation" :relocation="appState.relocation" />
         <UpdateBanner v-if="updateBanner" :update="updateBanner" />
         <HomePage v-if="currentPage === 'home'" :state="appState" />
         <ProfilesPage v-else-if="currentPage === 'profiles'" :state="appState" />
