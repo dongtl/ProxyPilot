@@ -14,7 +14,7 @@ version=$(jq -r .version src-tauri/tauri.conf.json)
 package=$(jq -r .version package.json)
 cargo=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
 if [ "$version" != "$package" ] || [ "$version" != "$cargo" ]; then
-  echo "版本号不一致：tauri.conf.json=$version，package.json=$package，Cargo.toml=$cargo" >&2
+  echo "版本号不一致：tauri.conf.json=${version}，package.json=${package}，Cargo.toml=${cargo}" >&2
   exit 1
 fi
 # A helper built with the test key would trust anyone holding that key.
@@ -27,7 +27,7 @@ fi
 
 # Through bash: a checkout from Windows carries no executable bit.
 bash scripts/build-macos-helper.sh
-echo "正在构建 ProxyPilot $version（macOS 通用版）…"
+echo "正在构建 ProxyPilot ${version}（macOS 通用版）…"
 pnpm tauri build --target universal-apple-darwin --config src-tauri/tauri.release.conf.json
 
 bundle=target/universal-apple-darwin/release/bundle
