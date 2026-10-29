@@ -76,7 +76,7 @@ jobs:
             [ "$want" = "$have" ] || { echo "$file was changed by the bundler"; exit 1; }
           done
           for file in proxypilot-helper sing-box; do
-            lipo -verify_arch arm64 x86_64 "$file" || { echo "$file is not universal: $(lipo -archs "$file")"; exit 1; }
+            lipo "$file" -verify_arch arm64 x86_64 || { echo "$file is not universal: $(lipo -archs "$file")"; exit 1; }
           done
 
       - name: Install the helper from the bundle
