@@ -62,6 +62,9 @@ pub struct Candidate {
     pub client: String,
     pub status: CandidateStatus,
     pub known: bool,
+    /// The port's owner could not be seen (macOS, a root-run core) and
+    /// `client` is the one proxy client found running, not a certainty.
+    pub guessed: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -161,6 +164,25 @@ pub struct ProbeReport {
     pub target: String,
     pub elapsed_ms: u64,
     pub stages: Vec<ProbeStage>,
+    /// Failed tries at targets before the one reported, for app.log only.
+    #[serde(skip)]
+    pub earlier: Vec<String>,
+}
+
+impl ProbeReport {
+    /// One try: target, outcome, total and per-stage milliseconds.
+    pub fn attempt_text(&self) -> String {
+        let stages: Vec<String> = self.stages.iter().map(|stage| format!("{} {}", stage.name, stage.ms)).collect();
+        format!("{} {} {}ms [{}]", self.target, self.code, self.elapsed_ms, stages.join(" · "))
+    }
+
+    /// For app.log: every try, oldest first. Local ports and public test
+    /// sites only, so nothing here identifies a node.
+    pub fn log_text(&self) -> String {
+        let mut tries = self.earlier.clone();
+        tries.push(self.attempt_text());
+        format!("{}：{}", if self.ok { "通过" } else { "没通过" }, tries.join("；"))
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

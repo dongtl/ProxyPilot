@@ -4,7 +4,7 @@
 
 use crate::state::{AppState, Shared, lock};
 use proxypilot_core::catalog::bypass_processes;
-use proxypilot_core::detect::{detect, upstream_owner};
+use proxypilot_core::detect::{detect, upstream_client};
 use proxypilot_core::probe::probe_upstream;
 use proxypilot_core::*;
 use std::collections::HashSet;
@@ -48,10 +48,11 @@ pub async fn set_upstream(shared: State<'_, Arc<Shared>>, upstream: Upstream) ->
     let shared = shared.inner().clone();
     blocking(move || {
         let upstream = upstream.normalised()?;
-        let client = upstream_owner(&upstream).and_then(|(_, name)| name).map(|name| catalog::client_label(Some(&name)).0);
+        let (client, guessed) = upstream_client(&upstream);
         shared.update_settings(|settings| {
             settings.upstream = Some(upstream.clone());
             settings.upstream_client = client;
+            settings.upstream_client_guessed = guessed;
             Ok(())
         })?;
         lock(&shared.runtime).upstream_status = UpstreamStatus::Unknown;
@@ -71,6 +72,7 @@ pub async fn test_upstream(shared: State<'_, Arc<Shared>>) -> Cmd<ProbeReport> {
     let upstream = lock(&shared.settings).upstream.clone().ok_or("还没有选择代理端口")?;
     blocking(move || {
         let report = probe_upstream(&upstream, Duration::from_secs(15));
+        shared.log(&format!("测试代理 {}:{} {}", upstream.host, upstream.port, report.log_text()));
         // Only a dead local port says the client is gone; a slow site does not.
         let status = if report.code == "local_unavailable" { UpstreamStatus::Unreachable } else { UpstreamStatus::Ok };
         lock(&shared.runtime).upstream_status = status;
@@ -203,6 +205,14 @@ pub async fn get_connections(shared: State<'_, Arc<Shared>>) -> Cmd<Vec<Connecti
     Ok(lock(&shared.traffic).rows())
 }
 
+/// Start the recent-connections list over. Connections still open come back
+/// on the next poll, counted from now.
+#[tauri::command]
+pub async fn clear_connections(shared: State<'_, Arc<Shared>>) -> Cmd<()> {
+    lock(&shared.traffic).clear();
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn update_settings(shared: State<'_, Arc<Shared>>, patch: SettingsPatch) -> Cmd<AppState> {
     let shared = shared.inner().clone();
@@ -264,7 +274,11 @@ pub async fn run_diagnostics(shared: State<'_, Arc<Shared>>, intranet: Option<St
             None => "未选择".to_owned(),
             Some(up) => {
                 let place = if up.ip().is_some_and(|ip| ip.is_loopback() || ip.is_unspecified()) { "本机" } else { "局域网设备" };
-                let client = settings.upstream_client.clone().unwrap_or_else(|| "未知程序".into());
+                let client = match (&settings.upstream_client, settings.upstream_client_guessed) {
+                    (Some(client), true) => format!("{client}（推测）"),
+                    (Some(client), false) => client.clone(),
+                    (None, _) => "未知程序".into(),
+                };
                 format!("{client}，{place}端口 {}（{}）", up.port, if up.kind == UpstreamKind::Http { "HTTP" } else { "SOCKS5" })
             }
         };

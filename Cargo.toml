@@ -3,7 +3,7 @@ members = ["src-tauri", "crates/proxypilot-core", "crates/proxypilot-helper"]
 resolver = "3"
 
 [workspace.package]
-version = "0.3.0"
+version = "0.3.1"
 edition = "2024"
 license = "GPL-3.0-only"
 rust-version = "1.90"

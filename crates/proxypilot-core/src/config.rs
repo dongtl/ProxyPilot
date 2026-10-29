@@ -385,4 +385,31 @@ mod tests {
         assert_eq!(proxy[1], &json!({"process_path_regex": [r"(?i)/Cursor\.app/Contents/"], "outbound": "proxy"}));
         assert_eq!(proxy[2], &json!({"domain_suffix": ["openai.com"], "outbound": "proxy"}));
     }
+
+    #[test]
+    fn app_presets_match_the_whole_bundle_on_macos_and_only_exe_names_on_windows() {
+        let (up, a) = (upstream(), api());
+        let mut settings = Settings::default();
+        for id in ["openai", "claude", "cursor"] {
+            settings.set_profile_enabled(id, true).unwrap();
+        }
+        let t = settings.targets();
+        let mut built = input(&up, &t, &a, DnsMode::Encrypted);
+        let windows = build_route_rules(&built);
+        let proxy: Vec<&Value> = windows.iter().filter(|rule| rule["outbound"] == "proxy").collect();
+        let names = proxy[0]["process_name"].as_array().unwrap();
+        assert!(names.iter().all(|v| v.as_str().unwrap().ends_with(".exe")), "{names:?}");
+        assert!(proxy.iter().all(|rule| rule.get("process_path_regex").is_none()));
+        built.os = Os::MacOs;
+        let mac = build_route_rules(&built);
+        let bundles = mac
+            .iter()
+            .find(|rule| rule["outbound"] == "proxy" && rule.get("process_path_regex").is_some())
+            .unwrap()["process_path_regex"]
+            .as_array()
+            .unwrap();
+        for app in ["ChatGPT", "Claude", "Cursor"] {
+            assert!(bundles.iter().any(|v| v == &format!(r"(?i)/{app}\.app/Contents/")), "{bundles:?}");
+        }
+    }
 }

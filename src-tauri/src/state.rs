@@ -42,6 +42,8 @@ pub struct AppState {
     pub core_message: String,
     pub upstream: Option<Upstream>,
     pub upstream_client: Option<String>,
+    /// The label is a guess; the UI says so.
+    pub upstream_client_guessed: bool,
     pub upstream_status: UpstreamStatus,
     pub profiles: Vec<Profile>,
     pub direct_processes: Vec<String>,
@@ -128,6 +130,7 @@ impl Shared {
             core_message,
             upstream: settings.upstream.clone(),
             upstream_client: settings.upstream_client.clone(),
+            upstream_client_guessed: settings.upstream_client.is_some() && settings.upstream_client_guessed,
             upstream_status,
             profiles: settings.profiles(),
             direct_processes: settings.direct_processes.clone(),

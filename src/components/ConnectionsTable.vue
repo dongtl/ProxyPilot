@@ -1,12 +1,14 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
-import { NButton, NDropdown, NTable, NTag, useMessage } from "naive-ui";
+import { computed, h, ref } from "vue";
+import { NButton, NDataTable, NDropdown, NTag, useMessage, type DataTableColumns } from "naive-ui";
 import type { ConnectionRow } from "../api";
 import { t } from "../i18n";
 import { actions } from "../store";
 import { formatDateTime, formatRelativeTime, formatTarget, isIpAddress } from "../format";
 
 const props = defineProps<{ rows: ConnectionRow[]; now: number }>();
+// An open "改走代理" menu: the page holds the list still so the row cannot move away under it.
+const emit = defineEmits<{ menu: [open: boolean] }>();
 
 const message = useMessage();
 const pending = ref<string | null>(null);
@@ -32,86 +34,96 @@ function choices(row: ConnectionRow): { key: Choice; label: string }[] {
   return out;
 }
 
-const items = computed(() =>
-  [...props.rows]
-    .sort((a, b) => b.lastSeen - a.lastSeen)
-    .map((row) => ({ row, key: rowKey(row), choices: choices(row) })),
-);
-
-async function choose(row: ConnectionRow, key: string, choice: Choice) {
-  pending.value = key;
+async function choose(row: ConnectionRow, choice: Choice) {
+  pending.value = rowKey(row);
   const target = choice === "app" ? row.process : choice === "site" ? row.site! : hostDomain(row.host);
   const ok = choice === "app" ? await actions.addApp(row.process) : await actions.addSite(target);
   if (ok) message.success(t.connections.added(target));
   pending.value = null;
 }
+
+function renderActions(row: ConnectionRow) {
+  const options = choices(row);
+  if (!options.length) return null;
+  return h(
+    NDropdown,
+    {
+      trigger: "click",
+      options,
+      onSelect: (choice: Choice) => choose(row, choice),
+      onUpdateShow: (open: boolean) => emit("menu", open),
+    },
+    () =>
+      h(
+        NButton,
+        {
+          size: "tiny",
+          secondary: true,
+          type: "primary",
+          loading: pending.value === rowKey(row),
+          "aria-label": t.connections.toProxyAria(formatTarget(row.host, row.port)),
+          "aria-haspopup": "menu",
+        },
+        () => t.connections.toProxy,
+      ),
+  );
+}
+
+// Long names end in "…" with the full text on hover, so every row is one line
+// high and only the rows on screen are drawn, however long the list gets.
+const columns = computed((): DataTableColumns<ConnectionRow> => [
+  {
+    key: "process",
+    title: t.connections.colProcess,
+    minWidth: 110,
+    ellipsis: { tooltip: true },
+    render: (row) => row.process || t.connections.unknownProcess,
+  },
+  {
+    key: "host",
+    title: t.connections.colHost,
+    minWidth: 160,
+    ellipsis: { tooltip: true },
+    render: (row) => formatTarget(row.host, row.port),
+  },
+  {
+    key: "route",
+    title: t.connections.colRoute,
+    width: 64,
+    render: (row) =>
+      h(
+        NTag,
+        { size: "small", bordered: false, type: row.route === "proxy" ? "success" : "default" },
+        () => (row.route === "proxy" ? t.connections.routeProxy : t.connections.routeDirect),
+      ),
+  },
+  { key: "count", title: t.connections.colCount, width: 60, align: "right" },
+  {
+    key: "lastSeen",
+    title: t.connections.colLastSeen,
+    width: 88,
+    render: (row) => h("span", { title: formatDateTime(row.lastSeen) }, formatRelativeTime(row.lastSeen, props.now)),
+  },
+  { key: "actions", title: t.connections.colActions, width: 104, render: renderActions },
+]);
 </script>
 
 <template>
-  <div class="scroll">
-    <NTable size="small" :single-line="false">
-      <thead>
-        <tr>
-          <th scope="col">{{ t.connections.colProcess }}</th>
-          <th scope="col">{{ t.connections.colHost }}</th>
-          <th scope="col">{{ t.connections.colRoute }}</th>
-          <th scope="col" class="num">{{ t.connections.colCount }}</th>
-          <th scope="col">{{ t.connections.colLastSeen }}</th>
-          <th scope="col">{{ t.connections.colActions }}</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr v-for="item in items" :key="item.key">
-          <td class="wrap">{{ item.row.process || t.connections.unknownProcess }}</td>
-          <td class="wrap">{{ formatTarget(item.row.host, item.row.port) }}</td>
-          <td>
-            <NTag size="small" :type="item.row.route === 'proxy' ? 'success' : 'default'" :bordered="false">
-              {{ item.row.route === "proxy" ? t.connections.routeProxy : t.connections.routeDirect }}
-            </NTag>
-          </td>
-          <td class="num">{{ item.row.count }}</td>
-          <td class="nowrap" :title="formatDateTime(item.row.lastSeen)">
-            {{ formatRelativeTime(item.row.lastSeen, now) }}
-          </td>
-          <td class="nowrap">
-            <NDropdown
-              v-if="item.choices.length"
-              trigger="click"
-              :options="item.choices"
-              @select="(choice: Choice) => choose(item.row, item.key, choice)"
-            >
-              <NButton
-                size="tiny"
-                secondary
-                type="primary"
-                :loading="pending === item.key"
-                :aria-label="t.connections.toProxyAria(formatTarget(item.row.host, item.row.port))"
-                aria-haspopup="menu"
-              >
-                {{ t.connections.toProxy }}
-              </NButton>
-            </NDropdown>
-          </td>
-        </tr>
-      </tbody>
-    </NTable>
-  </div>
+  <NDataTable
+    class="table"
+    size="small"
+    virtual-scroll
+    flex-height
+    :min-row-height="40"
+    :columns="columns"
+    :data="rows"
+    :row-key="rowKey"
+    :bordered="false"
+  />
 </template>
 
 <style scoped>
-.scroll {
-  overflow-x: auto;
-}
-
-.num {
-  text-align: right;
-}
-
-.wrap {
-  word-break: break-all;
-}
-
-.nowrap {
-  white-space: nowrap;
+.table {
+  height: 100%;
 }
 </style>

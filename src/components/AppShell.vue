@@ -58,7 +58,7 @@ onBeforeUnmount(disposeStore);
     </nav>
 
     <main ref="mainEl" class="main" tabindex="-1">
-      <div v-if="appState" class="content">
+      <div v-if="appState" class="content" :class="{ fill: currentPage === 'connections' }">
         <UpdateBanner v-if="updateBanner" :update="updateBanner" />
         <HomePage v-if="currentPage === 'home'" :state="appState" />
         <ProfilesPage v-else-if="currentPage === 'profiles'" :state="appState" />
@@ -128,6 +128,15 @@ onBeforeUnmount(disposeStore);
   max-width: 880px;
   margin: 0 auto;
   padding: 20px 24px 32px;
+}
+
+/* Pages with their own scrolling list fill the window's height; in a very
+   short window they grow past it and the page scrolls instead. */
+.content.fill {
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+  padding-bottom: 20px;
 }
 
 .boot {

@@ -3,14 +3,14 @@
     "id": "openai",
     "name": "ChatGPT / OpenAI",
     "description": "ChatGPT 网页与桌面版、OpenAI API、Codex",
-    "processes": ["ChatGPT.exe", "codex.exe"],
+    "processes": ["ChatGPT.exe", "ChatGPT.app", "codex.exe"],
     "domains": ["openai.com", "chatgpt.com", "oaistatic.com", "oaiusercontent.com", "challenges.cloudflare.com"]
   },
   {
     "id": "claude",
     "name": "Claude",
     "description": "Claude 网页与桌面版、Claude Code、Anthropic API",
-    "processes": ["claude.exe"],
+    "processes": ["claude.exe", "Claude.app"],
     "domains": ["claude.ai", "claude.com", "anthropic.com", "claudeusercontent.com"]
   },
   {
@@ -45,7 +45,7 @@
     "id": "cursor",
     "name": "Cursor",
     "description": "Cursor 编辑器及其 AI 服务",
-    "processes": ["Cursor.exe"],
+    "processes": ["Cursor.exe", "Cursor.app"],
     "domains": ["cursor.com", "cursor.sh", "cursorapi.com"]
   }
 ]

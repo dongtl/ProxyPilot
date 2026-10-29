@@ -90,7 +90,7 @@ Windows 版保持原样：整个程序以管理员身份运行，自己管理 si
 
 | 功能 | Windows | macOS |
 |---|---|---|
-| 本机监听端口 | GetExtendedTcpTable | `netstat -an -p tcp` 列出所有监听端口，包括以 root 运行的代理核心；`lsof` 补上本用户进程的 pid。查不到 pid 的端口照样探测 |
+| 本机监听端口 | GetExtendedTcpTable | `netstat -an -p tcp` 列出所有监听端口，包括以 root 运行的代理核心；`lsof` 补上本用户进程的 pid。查不到 pid 的端口照样探测；这时如果正在运行的已知代理客户端只有一个，就显示它的名字并标“推测”，有多个就不猜 |
 | 进程列表 | Toolhelp | `proc_listallpids` + `proc_pidpath` 取文件名，失败时退回 `proc_name` |
 | 网卡 | GetIfTable2 | `getifaddrs` |
 | 系统代理 | 注册表 Internet Settings | `scutil --proxy` |
@@ -105,6 +105,7 @@ Windows 版保持原样：整个程序以管理员身份运行，自己管理 si
   - 所以用户选的 `.app` 保存成 `Visual Studio Code.app` 这样的名字。
   - 生成配置时转成 `process_path_regex`：`(?i)/Visual Studio Code\.app/Contents/`，包里所有进程都会匹配上。
   - 命令行程序（node、codex 等）仍然按文件名匹配。
+- **预设：** 有桌面版的预设（ChatGPT、Claude、Cursor）同时列出 Windows 的 `.exe` 和 Mac 的 `.app`。Windows 上不生成按路径的规则，`.app` 条目不起作用；界面只显示当前系统的名字。
 - **直连名单：** 同样按 `.app` 处理。内置名单补上 Mac 上常见的代理客户端和企业 VPN，包括它们的 `.app` 名和后台进程名。以 `.exe` 结尾的条目，在 Mac 上去掉 `.exe` 后按进程名匹配，覆盖同名的命令行核心，比如 xray、sing-box、mihomo。
 - **最近连接：** 进程路径在某个 `.app` 里面时，显示和“改走代理”加入的都是那个 `.app`，而不是 Helper 子进程。
 - **运行中的程序列表：** 按 `.app` 合并，隐藏 `/System`、`/usr/libexec` 等系统程序。

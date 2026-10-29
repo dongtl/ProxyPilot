@@ -317,7 +317,7 @@ impl Supervisor {
         let exclude: Vec<u32> = std::iter::once(std::process::id()).chain(self.core.as_ref().and_then(|c| c.pid())).collect();
         let matches: Vec<Candidate> = detect(false, &exclude)
             .into_iter()
-            .filter(|c| c.known && c.status == CandidateStatus::Usable && c.client == label)
+            .filter(|c| (c.known || c.guessed) && c.status == CandidateStatus::Usable && c.client == label)
             .collect();
         let [candidate] = matches.as_slice() else { return false };
         let next = Upstream { kind: UpstreamKind::Socks5, host: candidate.host.clone(), port: candidate.port };

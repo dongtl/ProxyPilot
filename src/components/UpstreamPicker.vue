@@ -6,7 +6,7 @@ import { NButton, NFlex, NList, NListItem, NSpin, NTag, NText } from "naive-ui";
 import type { Candidate, Upstream } from "../api";
 import { t } from "../i18n";
 import { actions, appState } from "../store";
-import { formatEndpoint } from "../format";
+import { formatClient, formatEndpoint } from "../format";
 import ManualUpstreamForm from "./ManualUpstreamForm.vue";
 
 const props = defineProps<{ autoDetect?: boolean }>();
@@ -79,20 +79,21 @@ onMounted(() => {
     <NList v-if="!scanning && candidates.length" bordered>
       <NListItem v-for="c in candidates" :key="keyOf(c)">
         <NFlex align="center" :size="8">
-          <span class="client">{{ c.client }}</span>
+          <span class="client">{{ formatClient(c.client, c.guessed) }}</span>
           <NTag v-if="c.known" size="small" type="info" :bordered="false">{{ t.picker.known }}</NTag>
           <NTag v-if="c.status === 'needsAuth'" size="small" type="warning" :bordered="false">
             {{ t.picker.needsAuth }}
           </NTag>
         </NFlex>
         <NText depth="3">{{ t.picker.candidateDetail(formatEndpoint(c.host, c.port), c.process) }}</NText>
+        <NText v-if="c.guessed" depth="3" tag="div" class="guess">{{ t.upstream.guessedHint }}</NText>
         <template #suffix>
           <NTag v-if="isCurrent(c)" type="success" :bordered="false">{{ t.picker.inUse }}</NTag>
           <NButton
             v-else-if="c.status === 'usable'"
             :type="usableCount === 1 ? 'primary' : 'default'"
             :loading="pendingKey === keyOf(c)"
-            :aria-label="t.picker.useAria(c.client, c.port)"
+            :aria-label="t.picker.useAria(formatClient(c.client, c.guessed), c.port)"
             @click="pickCandidate(c)"
           >
             {{ t.picker.use }}
@@ -122,6 +123,10 @@ onMounted(() => {
 }
 
 .hint {
+  font-size: 12px;
+}
+
+.guess {
   font-size: 12px;
 }
 </style>

@@ -2738,7 +2738,7 @@ dependencies = [
 
 [[package]]
 name = "proxypilot-app"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "libc",
  "proxypilot-core",
@@ -2755,7 +2755,7 @@ dependencies = [
 
 [[package]]
 name = "proxypilot-core"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "base64 0.22.1",
  "libc",
@@ -2771,7 +2771,7 @@ dependencies = [
 
 [[package]]
 name = "proxypilot-helper"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "libc",
  "proxypilot-core",

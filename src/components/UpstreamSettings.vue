@@ -3,7 +3,7 @@ import { ref } from "vue";
 import { NButton, NFlex, NText, useMessage } from "naive-ui";
 import type { AppState } from "../api";
 import { t } from "../i18n";
-import { formatUpstream } from "../format";
+import { formatClient, formatUpstream } from "../format";
 import SectionCard from "./SectionCard.vue";
 import UpstreamPicker from "./UpstreamPicker.vue";
 import UpstreamStatusTag from "./UpstreamStatusTag.vue";
@@ -30,10 +30,11 @@ function onPicked() {
     <NFlex vertical :size="12">
       <div v-if="state.upstream">
         <NFlex align="center" :size="8">
-          <span class="client">{{ state.upstreamClient ?? t.upstream.unnamed }}</span>
+          <span class="client">{{ formatClient(state.upstreamClient, state.upstreamClientGuessed) }}</span>
           <UpstreamStatusTag :status="state.upstreamStatus" />
         </NFlex>
         <NText depth="3">{{ formatUpstream(state.upstream) }}</NText>
+        <NText v-if="state.upstreamClientGuessed" depth="3" tag="p" class="pp-hint">{{ t.upstream.guessedHint }}</NText>
       </div>
       <NText v-else depth="3">{{ t.upstream.none }}</NText>
 

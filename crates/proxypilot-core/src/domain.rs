@@ -87,6 +87,12 @@ pub fn site_of(host: &str) -> Option<String> {
     Some(labels[labels.len() - keep..].join("."))
 }
 
+/// Whether a `domain_suffix` rule for `suffix` matches `domain`: the domain
+/// itself or any name under it. Both are normalised.
+pub fn covers(suffix: &str, domain: &str) -> bool {
+    domain == suffix || domain.ends_with(&format!(".{suffix}"))
+}
+
 /// Normalise a list, dropping entries that fail and duplicates. Used for lists
 /// read from settings, where one bad entry must not discard the rest.
 pub fn normalise_all<'a>(items: impl IntoIterator<Item = &'a String>) -> Vec<String> {
@@ -151,6 +157,14 @@ mod tests {
         assert_eq!(site_of("110.242.68.66"), None);
         assert_eq!(site_of("2001:db8::1"), None);
         assert_eq!(site_of("localhost"), None);
+    }
+
+    #[test]
+    fn covers_matches_the_suffix_and_names_under_it_only() {
+        assert!(covers("github.com", "github.com"));
+        assert!(covers("github.com", "api.github.com"));
+        assert!(!covers("github.com", "notgithub.com"));
+        assert!(!covers("api.github.com", "github.com"));
     }
 
     #[test]

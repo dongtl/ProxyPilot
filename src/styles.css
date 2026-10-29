@@ -5,6 +5,12 @@ body,
   margin: 0;
 }
 
+/* NConfigProvider's wrapper div: without a height the whole window scrolls
+   instead of the main area, and pages cannot fill the window. */
+#app > .n-config-provider {
+  height: 100%;
+}
+
 /* Hidden visually, still read by screen readers. */
 .sr-only {
   position: absolute;

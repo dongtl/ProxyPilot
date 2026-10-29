@@ -30,6 +30,7 @@ export const api = {
   removeProfile: (id: string) => invoke<AppState>("remove_profile", { id }),
   listProcesses: () => invoke<RunningProcess[]>("list_processes"),
   getConnections: () => invoke<ConnectionRow[]>("get_connections"),
+  clearConnections: () => invoke<void>("clear_connections"),
   updateSettings: (patch: SettingsPatch) => invoke<AppState>("update_settings", { patch }),
   openDataDir: () => invoke<void>("open_data_dir"),
   /** Takes a few seconds: makes real connections and checks which way each went. */

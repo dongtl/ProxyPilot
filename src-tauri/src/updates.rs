@@ -48,13 +48,39 @@ pub fn info(update: &Update) -> UpdateInfo {
 
 /// The proxy client as a URL reqwest understands, if it is answering now.
 /// `socks5h` so GitHub's name is resolved by the proxy, not locally.
-fn proxy_url(upstream: &Upstream) -> Option<Url> {
+/// The second value: a proxy is chosen but its port did not answer.
+fn proxy_url(upstream: &Upstream) -> (Option<Url>, bool) {
     if !upstream_alive(upstream, ALIVE_TIMEOUT) {
-        return None;
+        return (None, true);
     }
     let scheme = if upstream.kind == UpstreamKind::Socks5 { "socks5h" } else { "http" };
     let host = if upstream.host.contains(':') { format!("[{}]", upstream.host) } else { upstream.host.clone() };
-    format!("{scheme}://{host}:{}", upstream.port).parse().ok()
+    (format!("{scheme}://{host}:{}", upstream.port).parse().ok(), false)
+}
+
+/// Which way a request went, for app.log. The proxy is a local port, never a node.
+fn route(proxy: Option<&Url>, silent: bool) -> String {
+    match proxy {
+        Some(proxy) => format!("走代理 {proxy}"),
+        None if silent => "直连（代理端口没响应）".into(),
+        None => "直连".into(),
+    }
+}
+
+/// The error and what caused it, for app.log: reqwest's own message is only
+/// "error sending request", the reason (timeout, refused, TLS) sits below it.
+fn chain(error: &dyn std::error::Error) -> String {
+    let mut parts = vec![error.to_string()];
+    let mut source = error.source();
+    while let Some(cause) = source {
+        let text = cause.to_string();
+        // `#[error(transparent)]` repeats the inner message; keep it once.
+        if parts.last().is_none_or(|last| !last.contains(&text)) {
+            parts.push(text);
+        }
+        source = cause.source();
+    }
+    parts.join(" ← ")
 }
 
 /// Worth retrying without the proxy: the request itself did not get through.
@@ -112,12 +138,22 @@ fn updater(shared: &Arc<Shared>, proxy: Option<&Url>) -> Result<tauri_plugin_upd
 /// offer it and `install` can use it.
 pub async fn check(shared: &Arc<Shared>) -> Result<Option<UpdateInfo>, String> {
     let upstream = lock(&shared.settings).upstream.clone();
-    let proxy = tauri::async_runtime::spawn_blocking(move || upstream.as_ref().and_then(proxy_url)).await.ok().flatten();
+    let (proxy, silent) = tauri::async_runtime::spawn_blocking(move || upstream.as_ref().map(proxy_url))
+        .await
+        .ok()
+        .flatten()
+        .unwrap_or((None, false));
+    let mut way = route(proxy.as_ref(), silent);
     let mut result = match updater(shared, proxy.as_ref()) {
         Ok(updater) => updater.check().await,
         Err(error) => Err(error),
     };
-    if proxy.is_some() && result.as_ref().is_err_and(is_network) {
+    if proxy.is_some()
+        && let Err(error) = &result
+        && is_network(error)
+    {
+        shared.log(&format!("检查更新失败（{way}），改为直连再试：{}", chain(error)));
+        way = route(None, false);
         result = match updater(shared, None) {
             Ok(updater) => updater.check().await,
             Err(error) => Err(error),
@@ -127,15 +163,15 @@ pub async fn check(shared: &Arc<Shared>) -> Result<Option<UpdateInfo>, String> {
         Ok(found) => {
             let info = found.as_ref().map(info);
             match &info {
-                Some(info) => shared.log(&format!("发现新版本 {}", info.version)),
-                None => shared.log("检查更新：已是最新版本"),
+                Some(info) => shared.log(&format!("发现新版本 {}（{way}）", info.version)),
+                None => shared.log(&format!("检查更新：已是最新版本（{way}）")),
             }
             *lock(&shared.update) = found;
             shared.emit();
             Ok(info)
         }
         Err(error) => {
-            shared.log(&format!("检查更新失败：{error}"));
+            shared.log(&format!("检查更新失败（{way}）：{}", chain(&error)));
             Err(describe(&error))
         }
     }
@@ -165,7 +201,7 @@ pub async fn install(shared: &Arc<Shared>) -> Result<(), String> {
         )
         .await
         .map_err(|error| {
-            shared.log(&format!("下载更新失败：{error}"));
+            shared.log(&format!("下载更新失败：{}", chain(&error)));
             describe(&error)
         })?;
     let _ = app.emit("update-progress", Progress { downloaded, total: Some(downloaded) });
@@ -176,7 +212,7 @@ pub async fn install(shared: &Arc<Shared>) -> Result<(), String> {
             shared.app.restart();
         }
         Err(error) => {
-            shared.log(&format!("安装更新失败：{error}"));
+            shared.log(&format!("安装更新失败：{}", chain(&error)));
             // If the exit hook already stopped the supervisor, this app can no
             // longer route; start over rather than linger half shut down.
             if shared.tx.send(Msg::Check).is_err() {

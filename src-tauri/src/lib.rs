@@ -125,6 +125,7 @@ pub fn run() {
             commands::remove_profile,
             commands::list_processes,
             commands::get_connections,
+            commands::clear_connections,
             commands::update_settings,
             commands::open_data_dir,
             commands::run_diagnostics,

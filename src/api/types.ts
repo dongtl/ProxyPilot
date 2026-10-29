@@ -22,6 +22,8 @@ export interface Candidate {
   status: "usable" | "needsAuth";
   /** True when the owning process is a known proxy client, used for ordering and the badge. */
   known: boolean;
+  /** macOS: the owner was hidden (a root-run core) and `client` is the one proxy client running. */
+  guessed: boolean;
 }
 
 export type CoreStatus = "stopped" | "starting" | "running" | "failed";
@@ -57,6 +59,8 @@ export interface AppState {
   upstream: Upstream | null;
   /** Label of the client owning the upstream port, when known. */
   upstreamClient: string | null;
+  /** The label is a guess: see Candidate.guessed. */
+  upstreamClientGuessed: boolean;
   upstreamStatus: UpstreamStatus;
   profiles: Profile[];
   /** User additions to the permanent direct list (process names). */

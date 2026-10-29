@@ -5,7 +5,7 @@ import type { AppState, ProbeReport, Upstream } from "../api";
 import { t } from "../i18n";
 import { actions } from "../store";
 import { goTo } from "../navigation";
-import { formatUpstream } from "../format";
+import { formatClient, formatUpstream } from "../format";
 import UpstreamStatusTag from "./UpstreamStatusTag.vue";
 import ProbeResult from "./ProbeResult.vue";
 
@@ -45,10 +45,11 @@ async function test() {
       <NFlex align="center" justify="space-between">
         <div>
           <NFlex align="center" :size="8">
-            <span class="client">{{ state.upstreamClient ?? t.upstream.unnamed }}</span>
+            <span class="client">{{ formatClient(state.upstreamClient, state.upstreamClientGuessed) }}</span>
             <UpstreamStatusTag :status="state.upstreamStatus" />
           </NFlex>
           <NText depth="3">{{ formatUpstream(upstream) }}</NText>
+          <NText v-if="state.upstreamClientGuessed" depth="3" tag="p" class="pp-hint">{{ t.upstream.guessedHint }}</NText>
         </div>
         <NButton :loading="testing" @click="test">{{ t.upstream.test }}</NButton>
       </NFlex>

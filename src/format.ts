@@ -20,6 +20,12 @@ export function formatUpdateProgress(progress: UpdateProgress | null): string {
   return t.update.downloadingSize((downloaded / 1024 / 1024).toFixed(1));
 }
 
+/** The proxy client's name as shown, marked when it is only a guess. */
+export function formatClient(client: string | null, guessed: boolean): string {
+  if (!client) return t.upstream.unnamed;
+  return guessed ? t.upstream.guessed(client) : client;
+}
+
 export function formatUpstream(upstream: Upstream): string {
   return `${t.upstream.kind[upstream.kind]} ${formatEndpoint(upstream.host, upstream.port)}`;
 }
@@ -48,12 +54,6 @@ const IPV4 = /^\d{1,3}(\.\d{1,3}){3}$/;
 /** Connection hosts are either a domain or a bare IP; IPv6 is the only form containing ":". */
 export function isIpAddress(host: string): boolean {
   return IPV4.test(host) || host.includes(":");
-}
-
-/** Joins the first few items and appends "等 N 个" when the list is longer. */
-export function summarizeList(items: string[], max: number): string {
-  const shown = items.slice(0, max).join(t.common.listSeparator);
-  return items.length > max ? `${shown} ${t.common.andMore(items.length)}` : shown;
 }
 
 /**

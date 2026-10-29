@@ -4,7 +4,7 @@
 //! new release reaches existing users instead of being frozen in their file.
 
 use crate::catalog::{self, normalise_names};
-use crate::domain::{normalise_all, normalise_domain};
+use crate::domain::{covers, normalise_all, normalise_domain};
 use crate::model::*;
 use crate::presets::presets;
 use serde::{Deserialize, Serialize};
@@ -36,6 +36,9 @@ pub struct Settings {
     /// Label of the client that owned the upstream port when it was chosen,
     /// used to follow that client to a new port after it restarts.
     pub upstream_client: Option<String>,
+    /// The label above is a guess: the port's owner was hidden (macOS, a
+    /// root-run core) and it names the one proxy client that was running.
+    pub upstream_client_guessed: bool,
     pub routing_enabled: bool,
     pub enabled_presets: Vec<String>,
     pub custom_profiles: Vec<CustomProfile>,
@@ -55,6 +58,7 @@ impl Default for Settings {
             version: 0,
             upstream: None,
             upstream_client: None,
+            upstream_client_guessed: false,
             routing_enabled: false,
             enabled_presets: Vec::new(),
             custom_profiles: Vec::new(),
@@ -178,12 +182,21 @@ impl Settings {
         Ok(())
     }
 
-    /// Add a site, or re-enable the custom entry that already has it. Returns the domain.
+    /// Add a site, or re-enable the custom entry that already has it. Returns
+    /// the domain. A site an enabled item already sends through the proxy is
+    /// refused with that item's name, so the list does not fill with duplicates.
     pub fn add_site(&mut self, input: &str) -> Result<String, String> {
         let domain = normalise_domain(input)?;
         if let Some(existing) = self.custom_profiles.iter_mut().find(|custom| custom.domains.contains(&domain)) {
             existing.enabled = true;
             return Ok(domain);
+        }
+        let owner = self
+            .profiles()
+            .into_iter()
+            .find(|profile| profile.enabled && profile.domains.iter().any(|suffix| covers(suffix, &domain)));
+        if let Some(owner) = owner {
+            return Err(format!("{domain} 已经在“{}”里走代理了，不用再添加", owner.name));
         }
         let id = self.next_custom_id();
         self.custom_profiles.push(CustomProfile {
@@ -218,6 +231,16 @@ impl Settings {
         {
             existing.enabled = true;
             return Ok(name);
+        }
+        let owner = self.profiles().into_iter().find(|profile| {
+            profile.enabled && profile.processes.iter().any(|process| crate::platform::name_key(process) == key)
+        });
+        if let Some(owner) = owner {
+            return Err(format!(
+                "{} 已经在“{}”里走代理了，不用再添加",
+                crate::platform::display_name(&name),
+                owner.name
+            ));
         }
         let id = self.next_custom_id();
         let label = crate::platform::display_name(&name);
@@ -368,10 +391,11 @@ mod tests {
     #[test]
     fn targets_union_enabled_profiles_sorted_and_deduped() {
         let mut settings = Settings::default();
-        settings.set_profile_enabled("openai", true).unwrap();
+        // Added before the preset is on: afterwards they would be refused as covered.
         settings.add_site("openai.com").unwrap();
         settings.add_app(r"C:\Apps\Zed.exe").unwrap();
         settings.add_app("chatgpt.EXE").unwrap();
+        settings.set_profile_enabled("openai", true).unwrap();
         let targets = settings.targets();
         assert_eq!(targets.domains.iter().filter(|d| *d == "openai.com").count(), 1);
         assert_eq!(targets.processes.iter().filter(|p| p.eq_ignore_ascii_case("chatgpt.exe")).count(), 1);
@@ -389,6 +413,23 @@ mod tests {
         settings.add_site("https://a.com/").unwrap();
         assert_eq!(settings.custom_profiles.len(), 1);
         assert!(settings.custom_profiles[0].enabled);
+    }
+
+    #[test]
+    fn sites_and_apps_already_proxied_are_refused_with_the_reason() {
+        let mut settings = Settings::default();
+        settings.set_profile_enabled("github", true).unwrap();
+        let error = settings.add_site("https://api.github.com/x").unwrap_err();
+        assert!(error.contains("GitHub"), "{error}");
+        settings.set_profile_enabled("openai", true).unwrap();
+        assert!(settings.add_app(r"C:\Tools\codex.exe").unwrap_err().contains("ChatGPT / OpenAI"));
+        // The macOS name of the same program.
+        assert!(settings.add_app("/opt/homebrew/bin/codex").is_err());
+        assert!(settings.custom_profiles.is_empty());
+        // With the preset off the site gets its own entry, which then covers its subdomains.
+        settings.set_profile_enabled("github", false).unwrap();
+        assert_eq!(settings.add_site("github.com").unwrap(), "github.com");
+        assert!(settings.add_site("gist.github.com").is_err());
     }
 
     #[test]

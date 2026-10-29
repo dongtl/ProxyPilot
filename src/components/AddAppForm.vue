@@ -1,14 +1,14 @@
 <script setup lang="ts">
 import { computed, h, onMounted, ref, useId } from "vue";
-import { NButton, NFlex, NSelect, NText, useMessage, type SelectOption } from "naive-ui";
+import { NButton, NFlex, NSelect, NText, useMessage, type SelectInst, type SelectOption } from "naive-ui";
 import { open } from "@tauri-apps/plugin-dialog";
 import type { RunningProcess } from "../api";
 import { t } from "../i18n";
 import { actions, errorText, isMac } from "../store";
-import SectionCard from "./SectionCard.vue";
 
 const message = useMessage();
 const selectId = useId();
+const select = ref<SelectInst | null>(null);
 const processes = ref<RunningProcess[]>([]);
 const loadingList = ref(false);
 const selected = ref<string | null>(null);
@@ -86,35 +86,38 @@ async function browse() {
   }
 }
 
-onMounted(loadProcesses);
+// Opened by a button, so focus the picker; the list loads meanwhile.
+onMounted(() => {
+  select.value?.focus();
+  void loadProcesses();
+});
 </script>
 
 <template>
-  <SectionCard :title="t.addApp.title">
-    <form @submit.prevent="addSelected">
-      <label :for="selectId" class="label">{{ t.addApp.label }}</label>
-      <NFlex :wrap="false" :size="8">
-        <NSelect
-          v-model:value="selected"
-          filterable
-          clearable
-          :options="options"
-          :filter="filter"
-          :loading="loadingList"
-          :placeholder="t.addApp.placeholder"
-          :render-label="renderLabel"
-          :render-tag="renderTag"
-          :input-props="{ id: selectId, 'aria-label': t.addApp.label }"
-        />
-        <NButton attr-type="submit" type="primary" :loading="adding">{{ t.addApp.submit }}</NButton>
-      </NFlex>
-      <NFlex :size="8" class="more">
-        <NButton size="small" :loading="loadingList" @click="loadProcesses">{{ t.addApp.refresh }}</NButton>
-        <NButton size="small" @click="browse">{{ t.addApp.browse }}</NButton>
-      </NFlex>
-      <NText depth="3" tag="p" class="pp-hint">{{ isMac ? t.addApp.hintMac : t.addApp.hint }}</NText>
-    </form>
-  </SectionCard>
+  <form @submit.prevent="addSelected">
+    <label :for="selectId" class="label">{{ t.addApp.label }}</label>
+    <NFlex :wrap="false" :size="8">
+      <NSelect
+        ref="select"
+        v-model:value="selected"
+        filterable
+        clearable
+        :options="options"
+        :filter="filter"
+        :loading="loadingList"
+        :placeholder="t.addApp.placeholder"
+        :render-label="renderLabel"
+        :render-tag="renderTag"
+        :input-props="{ id: selectId, 'aria-label': t.addApp.label }"
+      />
+      <NButton attr-type="submit" type="primary" :loading="adding">{{ t.addApp.submit }}</NButton>
+    </NFlex>
+    <NFlex :size="8" class="more">
+      <NButton size="small" :loading="loadingList" @click="loadProcesses">{{ t.addApp.refresh }}</NButton>
+      <NButton size="small" @click="browse">{{ t.addApp.browse }}</NButton>
+    </NFlex>
+    <NText depth="3" tag="p" class="pp-hint">{{ isMac ? t.addApp.hintMac : t.addApp.hint }}</NText>
+  </form>
 </template>
 
 <style scoped>

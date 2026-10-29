@@ -66,7 +66,8 @@ impl Failure {
 
     fn message(&self) -> &'static str {
         match self {
-            Failure::Timeout => "超时：代理客户端在规定时间内没有连通目标网站，可能是节点不可用或网络很慢",
+            Failure::Timeout => "超时：代理客户端在规定时间内没有连通目标网站，可能是节点不可用或网络很慢。\
+                客户端自带的测速只测节点，通过了不代表这个端口能用，请确认客户端正在使用的节点和路由模式",
             Failure::LocalUnavailable => "连不上代理端口：代理客户端没有运行，或端口已变化",
             Failure::Protocol => "端口有响应，但不是可用的代理协议，请确认端口类型（SOCKS5 / HTTP）",
             Failure::RemoteRefused => "代理客户端拒绝了连接：节点不可用，或客户端规则没有放行",
@@ -259,10 +260,12 @@ fn probe_once(upstream: &Upstream, host: &str, timeout: Duration) -> (Result<(),
 /// ceiling for giving up, not a health threshold: a cross-border path can
 /// legitimately need several seconds for a cold handshake.
 pub fn probe_upstream(upstream: &Upstream, timeout: Duration) -> ProbeReport {
-    let mut last = None;
+    let mut earlier = Vec::new();
+    let mut last: Option<ProbeReport> = None;
     for host in PROBE_TARGETS {
         let (result, laps) = probe_once(upstream, host, timeout);
         let elapsed_ms = laps.started.elapsed().as_millis() as u64;
+        earlier.extend(last.take().map(|report| report.attempt_text()));
         match result {
             Ok(()) => {
                 return ProbeReport {
@@ -272,16 +275,17 @@ pub fn probe_upstream(upstream: &Upstream, timeout: Duration) -> ProbeReport {
                     target: (*host).into(),
                     elapsed_ms,
                     stages: laps.stages,
+                    earlier,
                 };
             }
             // A dead local port fails the same way for every target.
             Err(Failure::LocalUnavailable) => {
-                return report(Failure::LocalUnavailable, host, elapsed_ms, laps.stages);
+                return ProbeReport { earlier, ..report(Failure::LocalUnavailable, host, elapsed_ms, laps.stages) };
             }
             Err(failure) => last = Some(report(failure, host, elapsed_ms, laps.stages)),
         }
     }
-    last.expect("PROBE_TARGETS is not empty")
+    ProbeReport { earlier, ..last.expect("PROBE_TARGETS is not empty") }
 }
 
 fn report(failure: Failure, host: &str, elapsed_ms: u64, stages: Vec<ProbeStage>) -> ProbeReport {
@@ -292,6 +296,7 @@ fn report(failure: Failure, host: &str, elapsed_ms: u64, stages: Vec<ProbeStage>
         target: host.into(),
         elapsed_ms,
         stages,
+        earlier: Vec::new(),
     }
 }
 
@@ -359,5 +364,12 @@ mod tests {
         assert_eq!(report.target, *PROBE_TARGETS.last().unwrap());
         assert_eq!(report.stages[0].name, "local");
         assert_eq!(report.stages[1].name, "socks_greeting");
+        // The log line keeps the first target's failure too.
+        assert_eq!(report.earlier.len(), PROBE_TARGETS.len() - 1);
+        let line = report.log_text();
+        assert!(line.starts_with("没通过："));
+        for host in PROBE_TARGETS {
+            assert!(line.contains(&format!("{host} remote_refused")), "{line}");
+        }
     }
 }

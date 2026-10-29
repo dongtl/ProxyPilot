@@ -67,12 +67,48 @@ pub fn select_targets(listeners: &[Listener], full: bool, exclude: &[u32]) -> Ve
     targets
 }
 
-/// Usable first, then recognised clients, then the usual ports, then by number.
+/// The one proxy client running, by label, for a port whose owner we cannot
+/// see: on macOS the app is an ordinary user and a root-run core's sockets are
+/// hidden from it, but the process list is not. `None` when there is no such
+/// client or more than one, so a guess is never a coin toss. sing-box is left
+/// out: the helper runs ours as root, and from outside it looks like any other.
+pub fn guess_client(programs: &[String]) -> Option<String> {
+    let mut labels: Vec<String> = Vec::new();
+    for program in programs {
+        if crate::platform::name_key(program) == "sing-box" {
+            continue;
+        }
+        let (label, known) = client_label(Some(program));
+        if known && !labels.contains(&label) {
+            labels.push(label);
+        }
+    }
+    match labels.as_slice() {
+        [only] => Some(only.clone()),
+        _ => None,
+    }
+}
+
+/// What each running process is, as `guess_client` wants it: the outermost
+/// `.app` it runs from, else its executable name.
+fn running_programs() -> Vec<String> {
+    sys::processes()
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|process| process.pid != 0 && !sys::kernel_pid(process.pid))
+        .map(|process| match sys::process_path(process.pid) {
+            Some(path) => crate::platform::program_of(&path),
+            None => process.name,
+        })
+        .collect()
+}
+
+/// Usable first, then recognised (or guessed) clients, then the usual ports, then by number.
 pub fn rank(candidates: &mut [Candidate]) {
     candidates.sort_by_key(|candidate| {
         (
             candidate.status != CandidateStatus::Usable,
-            !candidate.known,
+            !(candidate.known || candidate.guessed),
             COMMON_PORTS.iter().position(|port| *port == candidate.port).unwrap_or(usize::MAX),
             candidate.port,
         )
@@ -81,6 +117,9 @@ pub fn rank(candidates: &mut [Candidate]) {
 
 pub fn detect(full: bool, exclude: &[u32]) -> Vec<Candidate> {
     let targets = select_targets(&listeners(), full, exclude);
+    // Only worth the process walk when some port's owner is hidden from us.
+    let guess = if targets.iter().any(|(_, listener)| listener.pid == 0) { guess_client(&running_programs()) } else { None };
+    let guess = guess.as_ref();
     let mut found: Vec<Candidate> = Vec::new();
     // Greetings are local and short, but a full scan can cover a hundred
     // ports; a few threads keep it around a second.
@@ -93,16 +132,22 @@ pub fn detect(full: bool, exclude: &[u32]) -> Vec<Candidate> {
                         .iter()
                         .filter_map(|(ip, listener)| {
                             let status = socks5_greeting(*ip, listener.port, GREETING_TIMEOUT)?;
-                            let (client, known) = client_label(listener.process.as_deref());
+                            let (mut client, known) = client_label(listener.process.as_deref());
+                            // 0: the owner is another user's process we cannot see.
+                            let hidden = listener.pid == 0;
+                            let guessed = hidden && guess.is_some();
+                            if let Some(label) = guess.filter(|_| hidden) {
+                                client = label.clone();
+                            }
                             Some(Candidate {
                                 port: listener.port,
                                 host: ip.to_string(),
                                 process: listener.process.clone(),
-                                // 0: the owner is another user's process we cannot see.
-                                pid: (listener.pid != 0).then_some(listener.pid),
+                                pid: (!hidden).then_some(listener.pid),
                                 client,
                                 status,
                                 known,
+                                guessed,
                             })
                         })
                         .collect::<Vec<_>>()
@@ -137,6 +182,20 @@ pub fn upstream_owner(upstream: &crate::model::Upstream) -> Option<(u32, Option<
         return None;
     }
     port_owner(upstream.port)
+}
+
+/// Label of the client behind the upstream, and whether it is a guess (the
+/// port's owner is hidden, see `guess_client`). Only for an upstream on this machine.
+pub fn upstream_client(upstream: &crate::model::Upstream) -> (Option<String>, bool) {
+    if let Some((_, name)) = upstream_owner(upstream) {
+        return (name.map(|name| client_label(Some(&name)).0), false);
+    }
+    let local = upstream.ip().is_some_and(|ip| ip.is_loopback() || ip.is_unspecified());
+    let hidden = local && listeners().iter().any(|listener| listener.port == upstream.port && listener.pid == 0);
+    match hidden.then(|| guess_client(&running_programs())).flatten() {
+        Some(label) => (Some(label), true),
+        None => (None, false),
+    }
 }
 
 #[cfg(test)]
@@ -187,15 +246,28 @@ mod tests {
             client: String::new(),
             status,
             known,
+            guessed: false,
         };
+        let guessed = Candidate { guessed: true, ..make(7891, CandidateStatus::Usable, false) };
         let mut list = vec![
             make(30000, CandidateStatus::Usable, false),
             make(7890, CandidateStatus::NeedsAuth, true),
             make(7897, CandidateStatus::Usable, true),
             make(10808, CandidateStatus::Usable, true),
+            guessed,
         ];
         rank(&mut list);
         let ports: Vec<u16> = list.iter().map(|c| c.port).collect();
-        assert_eq!(ports, vec![10808, 7897, 30000, 7890]);
+        assert_eq!(ports, vec![10808, 7891, 7897, 30000, 7890]);
+    }
+
+    #[test]
+    fn guesses_only_when_exactly_one_proxy_client_runs() {
+        let names = |list: &[&str]| list.iter().map(|name| (*name).to_owned()).collect::<Vec<_>>();
+        // FlClash's app and its core are one client; our own sing-box and ordinary programs do not count.
+        assert_eq!(guess_client(&names(&["Finder", "FlClash.app", "FlClashCore", "sing-box"])), Some("FlClash".into()));
+        assert_eq!(guess_client(&names(&["Clash Verge.app"])), Some("Clash Verge".into()));
+        assert_eq!(guess_client(&names(&["FlClash.app", "Clash Verge.app"])), None);
+        assert_eq!(guess_client(&names(&["Finder", "sing-box", "Safari.app"])), None);
     }
 }
