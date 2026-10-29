@@ -36,23 +36,28 @@ jobs:
 
       # The helper only trusts manifests signed with the key it is built with;
       # here that is a key made for this run and thrown away with the runner.
+      # Both files are one base64 line without a final newline; tr makes
+      # sure of the one line, so they go in as plain NAME=value entries.
       - name: Make a throwaway signing key
         run: |
           pnpm tauri signer generate --ci -p smoke -w "$RUNNER_TEMP/smoke.key" > /dev/null
+          key=$(tr -d '\r\n' < "$RUNNER_TEMP/smoke.key")
+          pub=$(tr -d '\r\n' < "$RUNNER_TEMP/smoke.key.pub")
+          [ -n "$key" ] && [ -n "$pub" ] || { echo "the signer wrote no key"; exit 1; }
+          echo "::add-mask::$key"
           {
             echo "TAURI_SIGNING_PRIVATE_KEY_PASSWORD=smoke"
-            echo "PROXYPILOT_TEST_RELEASE_KEY=$(cat "$RUNNER_TEMP/smoke.key.pub")"
-            echo "TAURI_SIGNING_PRIVATE_KEY<<KEY_END"
-            cat "$RUNNER_TEMP/smoke.key"
-            echo "KEY_END"
+            echo "PROXYPILOT_TEST_RELEASE_KEY=$pub"
+            echo "TAURI_SIGNING_PRIVATE_KEY=$key"
           } >> "$GITHUB_ENV"
 
       - name: Build sing-box and the helper
         run: bash scripts/build-macos-helper.sh
 
+      # Absolute: cargo runs each test from its own crate's folder.
       - name: Rust tests (macOS)
         env:
-          PROXYPILOT_SING_BOX: src-tauri/binaries/macos/sing-box
+          PROXYPILOT_SING_BOX: ${{ github.workspace }}/src-tauri/binaries/macos/sing-box
         run: cargo test --workspace
 
       - name: Build the app bundle
@@ -120,7 +125,7 @@ jobs:
           open "$APP"
           sleep 15
           pgrep -f "ProxyPilot.app/Contents/MacOS/" > /dev/null || { echo "ProxyPilot quit right after starting"; exit 1; }
-          grep -F '启动 ' "$HOME/Library/Application Support/app.proxypilot.desktop/app.log" | tail -1
+          grep -F '启动 ' "$HOME/Library/Application Support/app.proxypilot.desktop/app.log" || { echo "app.log has no start line"; exit 1; }
           pkill -f "ProxyPilot.app/Contents/MacOS/" || true
           sleep 3
           find "$APP" | sort | diff "$RUNNER_TEMP/bundle-before.txt" - || { echo "the app wrote into its own bundle"; exit 1; }
