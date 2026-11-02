@@ -20,6 +20,9 @@ const bootError = ref<string | null>(null);
 // Update state is shared so the banner and the settings card show the same thing.
 const installing = ref(false);
 const progress = ref<UpdateProgress | null>(null);
+/** Why the last "立即更新" failed, kept on screen until the next try. */
+const failure = ref<{ version: string; text: string } | null>(null);
+const checking = ref(false);
 const dismissedVersion = ref<string | null>(null);
 const relocating = ref(false);
 
@@ -29,6 +32,14 @@ export const isMac = computed(() => state.value?.platform === "macos");
 export const loadError = computed(() => bootError.value);
 export const updateInstalling = computed(() => installing.value);
 export const updateProgress = computed(() => progress.value);
+export const updateChecking = computed(() => checking.value);
+/** Why updating to the offered release failed; null when it did not. */
+export const updateFailure = computed(() => {
+  const version = state.value?.update?.version;
+  return failure.value && failure.value.version === version ? failure.value.text : null;
+});
+/** Downloading can be stopped; replacing the files cannot. */
+export const updateCancellable = computed(() => installing.value && !progress.value?.installing);
 export const relocateBusy = computed(() => relocating.value);
 /** The found release, unless the user chose "later" for this version on the banner. */
 export const updateBanner = computed(() => {
@@ -82,32 +93,55 @@ export function disposeStore(): void {
   unlistenProgress = null;
 }
 
-/** "latest" when up to date, the release when one was found, null when the check failed (already toasted). */
+/**
+ * "latest" when up to date, the release when one was found, null when the
+ * check failed (already toasted) or was cancelled.
+ */
 async function checkUpdate(): Promise<UpdateInfo | "latest" | null> {
+  if (checking.value) return null;
+  checking.value = true;
   try {
-    const found = await api.checkUpdate();
-    if (!found) return "latest";
+    const outcome = await api.checkUpdate();
+    if (outcome.result === "cancelled") return null;
+    if (outcome.result === "latest") return "latest";
     // Asking again means the user wants to see it, even after "later".
     dismissedVersion.value = null;
-    return found;
+    return outcome.update;
   } catch (err) {
     notifyError(errorText(err));
     return null;
+  } finally {
+    checking.value = false;
   }
 }
 
-/** Success never comes back: the app exits and reopens as the new version. */
+/**
+ * Comes back only when cancelled or failed: on success the app exits and
+ * reopens as the new version. A failure stays on the banner and the settings
+ * card instead of a toast that is easy to miss.
+ */
 async function installUpdate(): Promise<void> {
-  if (installing.value) return;
+  const version = state.value?.update?.version;
+  if (installing.value || !version) return;
   installing.value = true;
   progress.value = null;
+  failure.value = null;
   try {
     await api.installUpdate();
   } catch (err) {
-    notifyError(errorText(err));
+    failure.value = { version, text: errorText(err) };
   } finally {
     installing.value = false;
     progress.value = null;
+  }
+}
+
+/** Stops the check or download in progress; the pending call then comes back. */
+async function cancelUpdate(): Promise<void> {
+  try {
+    await api.cancelUpdate();
+  } catch (err) {
+    notifyError(errorText(err));
   }
 }
 
@@ -161,6 +195,7 @@ export const actions = {
   runDiagnostics: (intranet: string | null) => query(() => api.runDiagnostics(intranet)),
   checkUpdate,
   installUpdate,
+  cancelUpdate,
   relocate,
   dismissUpdate: (version: string) => {
     dismissedVersion.value = version;

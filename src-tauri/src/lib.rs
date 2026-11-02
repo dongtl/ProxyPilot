@@ -60,7 +60,7 @@ pub fn run() {
                 tx,
                 tray: Mutex::new(None),
                 clash_api: proxypilot_core::config::ClashApi::generate().ok(),
-                update: Mutex::new(None),
+                update: Mutex::new(Default::default()),
                 paths,
             });
             shared.log(&format!(
@@ -138,6 +138,7 @@ pub fn run() {
             commands::run_diagnostics,
             commands::check_update,
             commands::install_update,
+            commands::cancel_update,
             commands::open_releases,
             commands::remove_helper,
             commands::relocate,

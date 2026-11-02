@@ -5,12 +5,12 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type {
   AppState,
   Candidate,
+  CheckOutcome,
   ConnectionRow,
   DiagnosticReport,
   ProbeReport,
   RunningProcess,
   SettingsPatch,
-  UpdateInfo,
   UpdateProgress,
   Upstream,
 } from "./types";
@@ -35,10 +35,15 @@ export const api = {
   openDataDir: () => invoke<void>("open_data_dir"),
   /** Takes a few seconds: makes real connections and checks which way each went. */
   runDiagnostics: (intranet: string | null) => invoke<DiagnosticReport>("run_diagnostics", { intranet }),
-  /** Resolves null when already up to date. A found release also lands in AppState.update. */
-  checkUpdate: () => invoke<UpdateInfo | null>("check_update"),
-  /** Downloads and installs the found release. On success it never resolves: the app exits and reopens. */
+  /** A found release also lands in AppState.update; the outcome also lands in AppState.lastCheck. */
+  checkUpdate: () => invoke<CheckOutcome>("check_update"),
+  /**
+   * Downloads and installs the found release. Resolves only when cancelled: on
+   * success the app exits and reopens as the new version.
+   */
   installUpdate: () => invoke<void>("install_update"),
+  /** Stops the check or download the user started; rejects once installing has begun. */
+  cancelUpdate: () => invoke<void>("cancel_update"),
   openReleases: () => invoke<void>("open_releases"),
   /** macOS: stops routing and removes the background helper; the system asks for the password. */
   removeHelper: () => invoke<AppState>("remove_helper"),

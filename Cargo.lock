@@ -2738,11 +2738,12 @@ dependencies = [
 
 [[package]]
 name = "proxypilot-app"
-version = "0.3.2"
+version = "0.3.3"
 dependencies = [
  "libc",
  "proxypilot-core",
  "reqwest",
+ "rustls",
  "serde",
  "serde_json",
  "tauri",
@@ -2755,7 +2756,7 @@ dependencies = [
 
 [[package]]
 name = "proxypilot-core"
-version = "0.3.2"
+version = "0.3.3"
 dependencies = [
  "base64 0.22.1",
  "libc",
@@ -2771,7 +2772,7 @@ dependencies = [
 
 [[package]]
 name = "proxypilot-helper"
-version = "0.3.2"
+version = "0.3.3"
 dependencies = [
  "libc",
  "proxypilot-core",

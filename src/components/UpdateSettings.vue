@@ -1,18 +1,32 @@
 <script setup lang="ts">
-import { ref, useId } from "vue";
+import { computed, ref, useId } from "vue";
 import { NButton, NFlex, NSwitch, NText, useMessage } from "naive-ui";
 import type { AppState } from "../api";
 import { t } from "../i18n";
-import { actions, updateInstalling, updateProgress } from "../store";
-import { formatUpdateProgress } from "../format";
+import {
+  actions,
+  updateCancellable,
+  updateChecking,
+  updateFailure,
+  updateInstalling,
+  updateProgress,
+} from "../store";
+import { formatClock, formatUpdateProgress } from "../format";
 import SectionCard from "./SectionCard.vue";
 
-defineProps<{ state: AppState }>();
+const props = defineProps<{ state: AppState }>();
 
 const message = useMessage();
 const headingId = useId();
 const switchPending = ref(false);
-const checking = ref(false);
+
+/** A failed check, automatic or not, until the next one works; moot once a release is offered. */
+const checkFailure = computed(() => {
+  const last = props.state.lastCheck;
+  if (!last?.error || props.state.update || updateChecking.value) return null;
+  const sentence = /[。！？]$/.test(last.error) ? last.error : `${last.error}。`;
+  return t.update.lastCheckFailed(formatClock(last.at), sentence);
+});
 
 async function setCheckUpdates(checkUpdates: boolean) {
   switchPending.value = true;
@@ -21,9 +35,7 @@ async function setCheckUpdates(checkUpdates: boolean) {
 }
 
 async function checkNow() {
-  checking.value = true;
   const result = await actions.checkUpdate();
-  checking.value = false;
   if (result === "latest") message.success(t.update.upToDate);
   else if (result) message.info(t.update.found(result.version));
 }
@@ -53,13 +65,22 @@ async function checkNow() {
         :loading="updateInstalling"
         @click="actions.installUpdate"
       >
-        {{ updateInstalling ? formatUpdateProgress(updateProgress) : t.update.install }}
+        {{ updateInstalling ? formatUpdateProgress(updateProgress) : updateFailure ? t.update.retry : t.update.install }}
       </NButton>
-      <NButton v-else size="small" :loading="checking" @click="checkNow">{{ t.update.checkNow }}</NButton>
-      <NButton size="small" quaternary :disabled="updateInstalling" @click="actions.openReleases">
+      <NButton v-else size="small" :loading="updateChecking" @click="checkNow">
+        {{ updateChecking ? t.update.checking : t.update.checkNow }}
+      </NButton>
+      <NButton v-if="updateChecking || updateCancellable" size="small" @click="actions.cancelUpdate">
+        {{ t.update.cancel }}
+      </NButton>
+      <NButton size="small" quaternary @click="actions.openReleases">
         {{ t.update.releases }}
       </NButton>
     </NFlex>
+    <NText v-if="state.update && updateFailure" type="warning" tag="p" class="status">{{ updateFailure }}</NText>
+    <NText v-else-if="checkFailure" depth="3" tag="p" class="status">
+      {{ checkFailure }}<template v-if="state.checkUpdates">{{ t.update.retryLater }}</template>
+    </NText>
   </SectionCard>
 </template>
 
@@ -71,5 +92,11 @@ async function checkNow() {
 
 .row {
   margin-top: 14px;
+}
+
+.status {
+  margin: 8px 0 0;
+  font-size: 12px;
+  word-break: break-word;
 }
 </style>

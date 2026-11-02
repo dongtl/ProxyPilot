@@ -74,6 +74,8 @@ export interface AppState {
   checkUpdates: boolean;
   /** A newer release found by the last check, waiting for the user; null when none. */
   update: UpdateInfo | null;
+  /** When the last check ran and, if it failed, why; null before the first. */
+  lastCheck: LastCheck | null;
   /** Whether a TUN can be created: administrator rights on Windows, a ready background helper on macOS. */
   elevated: boolean;
   /** Decides wording and macOS-only settings. */
@@ -98,11 +100,26 @@ export interface UpdateInfo {
   notes: string;
 }
 
+export interface LastCheck {
+  /** Milliseconds since 1970. */
+  at: number;
+  /** Why it failed, ready to show; null when it worked. */
+  error: string | null;
+}
+
+/** How a check the user asked for ended. */
+export type CheckOutcome =
+  | { result: "latest" }
+  | { result: "found"; update: UpdateInfo }
+  | { result: "cancelled" };
+
 /** Pushed as "update-progress" while the installer downloads. */
 export interface UpdateProgress {
   downloaded: number;
   /** Bytes; null when the server did not say. */
   total: number | null;
+  /** Downloaded and verified, now replacing the files: too late to cancel. */
+  installing: boolean;
 }
 
 export interface ProbeStage {

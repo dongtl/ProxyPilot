@@ -54,6 +54,8 @@ pub struct AppState {
     pub check_updates: bool,
     /// A newer release found by the last check, waiting for the user.
     pub update: Option<crate::updates::UpdateInfo>,
+    /// When the last check ran and, if it failed, why; None before the first.
+    pub last_check: Option<crate::updates::LastCheck>,
     /// Whether a TUN can be created: administrator rights on Windows, a
     /// ready background helper on macOS.
     pub elevated: bool,
@@ -88,8 +90,8 @@ pub struct Shared {
     pub tray: Mutex<Option<TrayHandles>>,
     /// The core's Clash API for this run of the app; None if it could not be prepared.
     pub clash_api: Option<proxypilot_core::config::ClashApi>,
-    /// The release the last check found, kept so installing does not ask GitHub again.
-    pub update: Mutex<Option<tauri_plugin_updater::Update>>,
+    /// The found release, the last check, and the check or download running now.
+    pub update: Mutex<crate::updates::UpdateState>,
     /// macOS: running outside the Applications folder; what the window offers.
     pub relocation: Option<crate::relocate::Relocation>,
 }
@@ -117,7 +119,10 @@ impl Shared {
             let runtime = lock(&self.runtime);
             (runtime.core_status, runtime.core_message.clone(), runtime.upstream_status, runtime.env.clone())
         };
-        let update = lock(&self.update).as_ref().map(crate::updates::info);
+        let (update, last_check) = {
+            let update = lock(&self.update);
+            (update.found.as_ref().map(crate::updates::info), update.last_check.clone())
+        };
         // A failed apply that fell back to the previous rules is still
         // "running"; say so where the user looks for problems.
         if core_status == CoreStatus::Running && !core_message.is_empty() {
@@ -144,6 +149,7 @@ impl Shared {
             autostart: settings.autostart,
             check_updates: settings.check_updates,
             update,
+            last_check,
             elevated: self.can_route.load(Ordering::Relaxed),
             platform: if cfg!(target_os = "macos") { "macos" } else { "windows" },
             helper_installed: helper_installed(),

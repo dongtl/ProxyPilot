@@ -310,15 +310,21 @@ pub async fn open_data_dir(shared: State<'_, Arc<Shared>>) -> Cmd<()> {
     tauri_plugin_opener::open_path(dir, None::<&str>).map_err(|error| format!("无法打开数据目录：{error}"))
 }
 
-/// Null means already up to date.
 #[tauri::command]
-pub async fn check_update(shared: State<'_, Arc<Shared>>) -> Cmd<Option<crate::updates::UpdateInfo>> {
-    crate::updates::check(shared.inner()).await
+pub async fn check_update(shared: State<'_, Arc<Shared>>) -> Cmd<crate::updates::CheckOutcome> {
+    crate::updates::check_now(shared.inner()).await
 }
 
+/// Resolves only when cancelled; a successful install exits or restarts the app.
 #[tauri::command]
 pub async fn install_update(shared: State<'_, Arc<Shared>>) -> Cmd<()> {
-    crate::updates::install(shared.inner()).await
+    crate::updates::install_now(shared.inner()).await
+}
+
+/// Stops a check or download the user started; refused once installing.
+#[tauri::command]
+pub async fn cancel_update(shared: State<'_, Arc<Shared>>) -> Cmd<()> {
+    crate::updates::cancel(shared.inner())
 }
 
 /// macOS: move into the Applications folder (or open the copy already there)

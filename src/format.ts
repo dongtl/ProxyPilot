@@ -14,9 +14,9 @@ export function formatTarget(host: string, port: number): string {
 /** What the update button says while installing. */
 export function formatUpdateProgress(progress: UpdateProgress | null): string {
   if (!progress) return t.update.preparing;
-  const { downloaded, total } = progress;
-  if (total && downloaded >= total) return t.update.launching;
-  if (total) return t.update.downloading(Math.floor((downloaded / total) * 100));
+  const { downloaded, total, installing } = progress;
+  if (installing) return t.update.installing;
+  if (total) return t.update.downloading(Math.min(100, Math.floor((downloaded / total) * 100)));
   return t.update.downloadingSize((downloaded / 1024 / 1024).toFixed(1));
 }
 
@@ -41,6 +41,14 @@ export function formatRelativeTime(epochMs: number, now: number): string {
 
 export function formatDateTime(epochMs: number): string {
   return new Date(epochMs).toLocaleString("zh-CN");
+}
+
+/** "09:12" today, "11月1日 09:12" on another day. */
+export function formatClock(epochMs: number, now = Date.now()): string {
+  const date = new Date(epochMs);
+  const time = date.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", hour12: false });
+  if (date.toDateString() === new Date(now).toDateString()) return time;
+  return `${date.getMonth() + 1}月${date.getDate()}日 ${time}`;
 }
 
 /** File name from a Windows or POSIX path: "C:\\Apps\\Code.exe" -> "Code.exe". */
