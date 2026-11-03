@@ -20,6 +20,7 @@ pub mod platform;
 pub mod presets;
 pub mod probe;
 pub mod settings;
+pub mod suggest;
 pub mod sys;
 pub mod traffic;
 

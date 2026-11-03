@@ -15,6 +15,13 @@ ProxyPilot 不是 sing-box 项目的一部分，也未获得其作者的认可�
 
 sing-box 在 Windows 上内置了 WireGuard 项目的 Wintun 驱动，用于创建虚拟网卡，其许可证见 https://www.wintun.net/ 。
 
+## domain-list-community
+
+“常用服务”里各项的网站名单（`crates/proxypilot-core/presets/presets.json`）大多对照 v2fly/domain-list-community 整理，只保留了各服务正常使用需要的网站。
+
+- 来源：https://github.com/v2fly/domain-list-community
+- 许可证：MIT License，Copyright (c) 2018-2019 V2Ray
+
 ## 界面依赖
 
 前端依赖（Vue、Naive UI、Tauri 等）的许可证随各自的包发布，可在 `pnpm-lock.yaml` 和 `Cargo.lock` 中查到具体版本。

@@ -5,6 +5,7 @@ import type { Profile } from "../api";
 import { t } from "../i18n";
 import { actions, isMac } from "../store";
 import { coverageLines, programsFor, stillProxied } from "../coverage";
+import ExtraSites from "./ExtraSites.vue";
 
 // Preset services only; the user's own entries are rows in CustomProfileList.
 const props = defineProps<{ profile: Profile; all: Profile[] }>();
@@ -31,7 +32,7 @@ async function toggle(enabled: boolean) {
 <template>
   <NCard tag="article" size="small" embedded :aria-labelledby="headingId">
     <template #header>
-      <h3 :id="headingId" class="pp-item-title">{{ profile.name }}</h3>
+      <h4 :id="headingId" class="pp-item-title">{{ profile.name }}</h4>
     </template>
     <template #header-extra>
       <NFlex align="center" :size="8" :wrap="false">
@@ -45,7 +46,8 @@ async function toggle(enabled: boolean) {
       </NFlex>
     </template>
 
-    <NText v-if="profile.description" tag="p" class="desc">{{ profile.description }}</NText>
+    <NText v-if="profile.description" tag="p" class="desc" :title="profile.description">{{ profile.description }}</NText>
+    <ExtraSites :profile="profile" />
     <NText v-for="line in coverage" :key="line" type="info" tag="p" class="note">{{ line }}</NText>
     <div v-show="expanded" :id="contentsId">
       <NText v-if="profile.domains.length" depth="3" tag="div" class="list">
@@ -70,7 +72,12 @@ async function toggle(enabled: boolean) {
   white-space: nowrap;
 }
 
+/* Two lines at most, so a row of cards is not as tall as its longest description. */
 .desc {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
   margin: 0 0 6px;
 }
 

@@ -12,6 +12,7 @@ import {
   type UpdateInfo,
   type UpdateProgress,
   type Upstream,
+  type WithState,
 } from "./api";
 import { t } from "./i18n";
 
@@ -168,6 +169,18 @@ async function apply(call: () => Promise<AppState>): Promise<boolean> {
   }
 }
 
+/** Runs a command that returns AppState plus a result. Resolves with the result, null on failure; errors are toasted. */
+async function withResult<T>(call: () => Promise<WithState<T>>): Promise<T | null> {
+  try {
+    const { state: next, result } = await call();
+    state.value = next;
+    return result;
+  } catch (err) {
+    notifyError(errorText(err));
+    return null;
+  }
+}
+
 /** Runs a read-only command. Resolves null on failure; errors are toasted. */
 async function query<T>(call: () => Promise<T>): Promise<T | null> {
   try {
@@ -183,7 +196,13 @@ export const actions = {
   setUpstream: (upstream: Upstream) => apply(() => api.setUpstream(upstream)),
   setProfileEnabled: (id: string, enabled: boolean) =>
     apply(() => api.setProfileEnabled(id, enabled)),
-  addSite: (input: string) => apply(() => api.addSite(input)),
+  /** What adding did, or null when it failed (already toasted). */
+  addSite: (input: string) => withResult(() => api.addSite(input)),
+  /** The sites that now go through the proxy, or null on failure. */
+  acceptSuggestion: (id: string) => withResult(() => api.acceptSuggestion(id)),
+  ignoreSuggestion: (id: string) => apply(() => api.ignoreSuggestion(id)),
+  dismissSuggestion: (id: string) => apply(() => api.dismissSuggestion(id)),
+  removeExtraSite: (id: string, site: string) => apply(() => api.removeExtraSite(id, site)),
   addApp: (process: string) => apply(() => api.addApp(process)),
   removeProfile: (id: string) => apply(() => api.removeProfile(id)),
   updateSettings: (patch: SettingsPatch) => apply(() => api.updateSettings(patch)),

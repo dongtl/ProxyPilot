@@ -36,10 +36,38 @@ export interface Profile {
   name: string;
   /** Short description shown under the name; empty for custom entries. */
   description: string;
+  /** A preset's group on the profiles page; empty for custom entries. */
+  category: PresetCategory | "";
+  /** Other names a preset is searched by ("推特" for X). */
+  keywords: string[];
   processes: string[];
   domains: string[];
+  /** Sites the user added because this item's pages needed them; removable one by one. */
+  extraDomains: string[];
   enabled: boolean;
   source: "preset" | "custom";
+}
+
+export type PresetCategory = "ai" | "web" | "social" | "media" | "dev";
+
+/** What "添加网站" did. */
+export interface SiteAdded {
+  domain: string;
+  /** The built-in service it belongs to, switched on instead of a separate entry. */
+  preset: string | null;
+}
+
+/** Sites a proxied page needed but could not reach directly, offered to its item. */
+export interface Suggestion {
+  profileId: string;
+  profileName: string;
+  sites: string[];
+}
+
+/** A command's new state plus what it did. */
+export interface WithState<T> {
+  state: AppState;
+  result: T;
 }
 
 export interface EnvFinding {
@@ -76,6 +104,10 @@ export interface AppState {
   update: UpdateInfo | null;
   /** When the last check ran and, if it failed, why; null before the first. */
   lastCheck: LastCheck | null;
+  /** Sites proxied pages needed but could not reach directly, per item. */
+  suggestions: Suggestion[];
+  /** A system notification when such sites turn up. */
+  notifyMissingSites: boolean;
   /** Whether a TUN can be created: administrator rights on Windows, a ready background helper on macOS. */
   elevated: boolean;
   /** Decides wording and macOS-only settings. */
@@ -155,6 +187,8 @@ export interface ConnectionRow {
   count: number;
   /** Unix epoch milliseconds. */
   lastSeen: number;
+  /** A direct connection here got nothing back for seconds: most likely blocked. */
+  stalled: boolean;
 }
 
 export type CheckStatus = "ok" | "warn" | "fail" | "skip";
@@ -182,4 +216,5 @@ export interface SettingsPatch {
   logLevel?: LogLevel;
   autostart?: boolean;
   checkUpdates?: boolean;
+  notifyMissingSites?: boolean;
 }

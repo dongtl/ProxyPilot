@@ -2,7 +2,7 @@
 // another, enabled profile covers them. Mirrors the backend's matching:
 // domain_suffix rules (the domain and every name under it) and program names
 // compared case-insensitively without ".exe".
-import type { Profile } from "./api";
+import type { Profile, SiteAdded } from "./api";
 import { t } from "./i18n";
 
 /** Program names that apply on this system, without ".exe"/".app": a preset lists both Windows and macOS names. */
@@ -17,8 +17,26 @@ export function programsFor(names: string[], mac: boolean): string[] {
   return out;
 }
 
-function covers(suffix: string, domain: string): boolean {
+export function covers(suffix: string, domain: string): boolean {
   return domain === suffix || domain.endsWith(`.${suffix}`);
+}
+
+/** An item's own sites and the ones added to it. */
+export function allDomains(profile: Profile): string[] {
+  return [...profile.domains, ...profile.extraDomains];
+}
+
+/**
+ * The toast after "添加网站": a site of a built-in service switched the whole
+ * service on, so say which and name a few of the sites that came with it.
+ */
+export function siteAddedText(added: SiteAdded, profiles: Profile[]): string {
+  const preset = added.preset ? profiles.find((profile) => profile.id === added.preset) : undefined;
+  if (!preset) return t.addSite.added;
+  const others = preset.domains.filter((domain) => !covers(domain, added.domain));
+  const shown = others.slice(0, 3).join(t.common.listSeparator);
+  const list = others.length > 3 ? `${shown} ${t.common.andMore(others.length)}` : shown;
+  return others.length ? t.addSite.addedPreset(added.domain, preset.name, list) : t.addSite.addedPresetOnly(preset.name);
 }
 
 function programKey(name: string): string {
@@ -39,7 +57,8 @@ export function stillProxied(profile: Profile, all: Profile[], mac: boolean): Co
   const out: CoveredBy[] = [];
   for (const other of all) {
     if (!other.enabled || other.id === profile.id) continue;
-    const items = profile.domains.filter((domain) => other.domains.some((suffix) => covers(suffix, domain)));
+    const theirSites = allDomains(other);
+    const items = allDomains(profile).filter((domain) => theirSites.some((suffix) => covers(suffix, domain)));
     const theirs = new Set(other.processes.map(programKey));
     for (const name of profile.processes.filter((process) => theirs.has(programKey(process)))) {
       for (const shown of programsFor([name], mac)) if (!items.includes(shown)) items.push(shown);

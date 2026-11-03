@@ -11,8 +11,10 @@ import type {
   ProbeReport,
   RunningProcess,
   SettingsPatch,
+  SiteAdded,
   UpdateProgress,
   Upstream,
+  WithState,
 } from "./types";
 
 export * from "./types";
@@ -25,7 +27,12 @@ export const api = {
   setRouting: (enabled: boolean) => invoke<AppState>("set_routing", { enabled }),
   setProfileEnabled: (id: string, enabled: boolean) =>
     invoke<AppState>("set_profile_enabled", { id, enabled }),
-  addSite: (input: string) => invoke<AppState>("add_site", { input }),
+  addSite: (input: string) => invoke<WithState<SiteAdded>>("add_site", { input }),
+  /** Resolves with the sites that now go through the proxy. */
+  acceptSuggestion: (id: string) => invoke<WithState<string[]>>("accept_suggestion", { id }),
+  ignoreSuggestion: (id: string) => invoke<AppState>("ignore_suggestion", { id }),
+  dismissSuggestion: (id: string) => invoke<AppState>("dismiss_suggestion", { id }),
+  removeExtraSite: (id: string, site: string) => invoke<AppState>("remove_extra_site", { id, site }),
   addApp: (process: string) => invoke<AppState>("add_app", { process }),
   removeProfile: (id: string) => invoke<AppState>("remove_profile", { id }),
   listProcesses: () => invoke<RunningProcess[]>("list_processes"),

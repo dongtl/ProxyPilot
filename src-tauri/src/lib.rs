@@ -5,6 +5,7 @@ mod autostart;
 mod commands;
 #[cfg(target_os = "macos")]
 mod helper_client;
+mod missing;
 mod paths;
 mod relocate;
 mod state;
@@ -29,6 +30,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_notification::init())
         .setup(move |app| {
             let handle = app.handle().clone();
             let paths = AppPaths::resolve(&handle)?;
@@ -61,6 +63,7 @@ pub fn run() {
                 tray: Mutex::new(None),
                 clash_api: proxypilot_core::config::ClashApi::generate().ok(),
                 update: Mutex::new(Default::default()),
+                suggestions: Mutex::new(Default::default()),
                 paths,
             });
             shared.log(&format!(
@@ -142,6 +145,10 @@ pub fn run() {
             commands::open_releases,
             commands::remove_helper,
             commands::relocate,
+            commands::accept_suggestion,
+            commands::ignore_suggestion,
+            commands::dismiss_suggestion,
+            commands::remove_extra_site,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

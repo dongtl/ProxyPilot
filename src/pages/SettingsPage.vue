@@ -17,6 +17,8 @@ defineProps<{ state: AppState }>();
 const message = useMessage();
 const autostartHeadingId = useId();
 const autostartPending = ref(false);
+const notifyHeadingId = useId();
+const notifyPending = ref(false);
 const helperPending = ref(false);
 
 const dnsOptions: { value: DnsMode; label: string; hint: string }[] = [
@@ -39,6 +41,12 @@ async function setAutostart(autostart: boolean) {
   autostartPending.value = true;
   if (await actions.updateSettings({ autostart })) message.success(t.settings.saved);
   autostartPending.value = false;
+}
+
+async function setNotify(notifyMissingSites: boolean) {
+  notifyPending.value = true;
+  if (await actions.updateSettings({ notifyMissingSites })) message.success(t.settings.saved);
+  notifyPending.value = false;
 }
 
 // macOS only: the system asks for the password, so this can take a while.
@@ -93,6 +101,18 @@ async function removeHelper() {
           :loading="autostartPending"
           :aria-labelledby="autostartHeadingId"
           @update:value="setAutostart"
+        />
+      </NFlex>
+    </SectionCard>
+
+    <SectionCard :title="t.settings.notifyTitle" :heading-id="notifyHeadingId">
+      <NFlex align="center" justify="space-between" :wrap="false">
+        <NText depth="3">{{ t.settings.notifyHint }}</NText>
+        <NSwitch
+          :value="state.notifyMissingSites"
+          :loading="notifyPending"
+          :aria-labelledby="notifyHeadingId"
+          @update:value="setNotify"
         />
       </NFlex>
     </SectionCard>

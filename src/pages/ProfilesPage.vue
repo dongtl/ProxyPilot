@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
-import { NButton, NFlex, NText, useThemeVars } from "naive-ui";
-import type { AppState } from "../api";
+import { NButton, NFlex, NInput, NText, useThemeVars } from "naive-ui";
+import type { AppState, PresetCategory, Profile } from "../api";
 import { t } from "../i18n";
 import SectionCard from "../components/SectionCard.vue";
 import ProfileCard from "../components/ProfileCard.vue";
@@ -11,9 +11,27 @@ import AddAppForm from "../components/AddAppForm.vue";
 
 const props = defineProps<{ state: AppState }>();
 
+const CATEGORIES: PresetCategory[] = ["ai", "web", "social", "media", "dev"];
+
 const themeVars = useThemeVars();
-const presets = computed(() => props.state.profiles.filter((p) => p.source === "preset"));
 const custom = computed(() => props.state.profiles.filter((p) => p.source === "custom"));
+const query = ref("");
+
+/** By name, other names ("推特"), description or site, so "twimg" finds X too. */
+function matches(profile: Profile, text: string): boolean {
+  const haystack = [profile.name, profile.description, ...profile.keywords, ...profile.domains];
+  return haystack.some((item) => item.toLowerCase().includes(text));
+}
+
+const groups = computed(() => {
+  const text = query.value.trim().toLowerCase();
+  const presets = props.state.profiles.filter((p) => p.source === "preset" && (!text || matches(p, text)));
+  return CATEGORIES.map((category) => ({
+    category,
+    title: t.profiles.categories[category],
+    profiles: presets.filter((p) => p.category === category),
+  })).filter((group) => group.profiles.length);
+});
 
 // The add forms open right above the list they add to. Mounting the app form
 // only when asked also spares listing the running programs on every visit.
@@ -29,13 +47,8 @@ function open(form: "site" | "app") {
   <NText tag="p" class="lead">{{ t.profiles.intro }}</NText>
   <NText tag="p" depth="3" class="lead">{{ t.profiles.restartNote }}</NText>
 
+  <!-- The user's own list first: with a few dozen services below it, it would otherwise sit far down the page. -->
   <NFlex vertical :size="16" class="page">
-    <SectionCard :title="t.profiles.presets">
-      <div class="grid">
-        <ProfileCard v-for="profile in presets" :key="profile.id" :profile="profile" :all="state.profiles" />
-      </div>
-    </SectionCard>
-
     <SectionCard :title="t.profiles.custom">
       <template #extra>
         <NFlex :size="8">
@@ -65,6 +78,26 @@ function open(form: "site" | "app") {
       <CustomProfileList v-if="custom.length" :profiles="custom" :all="state.profiles" />
       <NText v-else depth="3">{{ t.profiles.customEmpty }}</NText>
     </SectionCard>
+
+    <SectionCard :title="t.profiles.presets">
+      <template #extra>
+        <NInput
+          v-model:value="query"
+          size="small"
+          clearable
+          class="search"
+          :placeholder="t.profiles.searchPlaceholder"
+          :input-props="{ 'aria-label': t.profiles.searchLabel, autocomplete: 'off', spellcheck: false }"
+        />
+      </template>
+      <section v-for="group in groups" :key="group.category" class="group" :aria-label="group.title">
+        <h3 class="group-title">{{ group.title }}</h3>
+        <div class="grid">
+          <ProfileCard v-for="profile in group.profiles" :key="profile.id" :profile="profile" :all="state.profiles" />
+        </div>
+      </section>
+      <NText v-if="!groups.length" depth="3" tag="p" class="empty">{{ t.profiles.searchEmpty(query.trim()) }}</NText>
+    </SectionCard>
   </NFlex>
 </template>
 
@@ -77,10 +110,29 @@ function open(form: "site" | "app") {
   margin-top: 12px;
 }
 
+.search {
+  width: 220px;
+}
+
+.group + .group {
+  margin-top: 16px;
+}
+
+.group-title {
+  margin: 0 0 8px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+/* Three to a row in the default window: with this many services, two made a very long page. */
 .grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
   gap: 12px;
+}
+
+.empty {
+  margin: 0;
 }
 
 .form {

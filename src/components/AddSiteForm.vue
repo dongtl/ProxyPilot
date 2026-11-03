@@ -2,7 +2,8 @@
 import { onMounted, ref, useId } from "vue";
 import { NButton, NFlex, NInput, NText, useMessage, type InputInst } from "naive-ui";
 import { t } from "../i18n";
-import { actions } from "../store";
+import { actions, appState } from "../store";
+import { siteAddedText } from "../coverage";
 
 const message = useMessage();
 const inputId = useId();
@@ -21,8 +22,10 @@ async function submit() {
     return;
   }
   pending.value = true;
-  if (await actions.addSite(input)) {
-    message.success(t.addSite.added);
+  const added = await actions.addSite(input);
+  if (added) {
+    // Longer when it names the service that was switched on and what came with it.
+    message.success(siteAddedText(added, appState.value?.profiles ?? []), { duration: added.preset ? 6000 : 3000 });
     value.value = "";
   }
   pending.value = false;

@@ -24,6 +24,8 @@ tauri-plugin-opener = "~2.7.1"
 tauri-plugin-dialog = "~2.8.2"
 tauri-plugin-single-instance = "2"
 tauri-plugin-updater = "~2.14.0"
+# Sent from Rust only (a page missing sites), so no JS package or permission.
+tauri-plugin-notification = "~2.8.0"
 # Not used directly: turns on SOCKS support in the updater's reqwest, so
 # update checks can go through the user's SOCKS5 proxy client.
 reqwest = { version = "0.13.5", default-features = false, features = ["socks"] }

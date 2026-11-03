@@ -6,8 +6,9 @@
 use crate::catalog::{self, normalise_names};
 use crate::domain::{covers, normalise_all, normalise_domain};
 use crate::model::*;
-use crate::presets::presets;
+use crate::presets::{Preset, presets, service_of};
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::fs;
 use std::io::{self, Write};
 use std::path::Path;
@@ -50,6 +51,14 @@ pub struct Settings {
     /// Look for a new release once a day. On by default, so files written
     /// before this setting existed turn it on too.
     pub check_updates: bool,
+    /// Sites added to an item, preset or custom, because its pages needed
+    /// them, by item id. Kept apart from the item's own sites so each can be
+    /// taken out again.
+    pub extra_domains: BTreeMap<String, Vec<String>>,
+    /// Sites the user asked never to be suggested again.
+    pub ignored_sites: Vec<String>,
+    /// A system notification when a page seems to be missing sites. On by default.
+    pub notify_missing_sites: bool,
 }
 
 impl Default for Settings {
@@ -68,6 +77,9 @@ impl Default for Settings {
             log_level: LogLevel::default(),
             autostart: false,
             check_updates: true,
+            extra_domains: BTreeMap::new(),
+            ignored_sites: Vec::new(),
+            notify_missing_sites: true,
         }
     }
 }
@@ -90,7 +102,16 @@ impl Settings {
             Err(error) => return (Settings::default(), Some(format!("无法读取设置文件：{error}"))),
         };
         match serde_json::from_str::<Settings>(&text) {
-            Ok(settings) => (settings.sanitised(), None),
+            Ok(settings) => {
+                let (settings, folded) = settings.sanitised();
+                if folded.is_empty() {
+                    return (settings, None);
+                }
+                // Saved right away, so the note is logged once rather than on every start.
+                let saved = settings.save(path).map_or_else(|error| format!("，但没能保存：{error}"), |_| String::new());
+                let names = folded.iter().map(|name| format!("“{name}”")).collect::<Vec<_>>().join("、");
+                (settings, Some(format!("自己添加的网站已换成内置的 {names}，它们需要的其它网站也会一起走代理{saved}")))
+            }
             Err(error) => {
                 let aside = path.with_extension("json.corrupt");
                 let moved = fs::rename(path, &aside).is_ok();
@@ -108,8 +129,9 @@ impl Settings {
         write_atomic(path, text.as_bytes())
     }
 
-    /// Drop what a hand edit could have broken, keep everything else.
-    fn sanitised(mut self) -> Settings {
+    /// Drop what a hand edit could have broken, keep everything else. Also
+    /// returns the presets that took over the user's own sites (see `fold_into_presets`).
+    fn sanitised(mut self) -> (Settings, Vec<String>) {
         self.upstream = self.upstream.and_then(|upstream| upstream.normalised().ok());
         let known: Vec<&str> = presets().iter().map(|preset| preset.id.as_str()).collect();
         self.enabled_presets.retain(|id| known.contains(&id.as_str()));
@@ -123,18 +145,83 @@ impl Settings {
         self.custom_profiles.retain(|profile| {
             profile.id.starts_with(CUSTOM_PREFIX) && !(profile.processes.is_empty() && profile.domains.is_empty())
         });
-        self
+        self.ignored_sites = normalise_all(&self.ignored_sites);
+        for sites in self.extra_domains.values_mut() {
+            *sites = normalise_all(sites.iter());
+        }
+        let folded = self.fold_into_presets();
+        self.prune_extras();
+        (self, folded)
+    }
+
+    /// Sites the user added before a preset covered them (x.com, before the X
+    /// preset existed) become that preset, which also brings the sites the
+    /// service needs (twimg.com) that the user could not have known about.
+    /// Only entries made purely of one service's sites; anything with a
+    /// program, or spanning services, is left as it is.
+    fn fold_into_presets(&mut self) -> Vec<String> {
+        let mut folded: Vec<String> = Vec::new();
+        let mut index = 0;
+        while index < self.custom_profiles.len() {
+            let custom = &self.custom_profiles[index];
+            let Some(preset) = sole_service(&custom.domains).filter(|_| custom.processes.is_empty()) else {
+                index += 1;
+                continue;
+            };
+            let custom = self.custom_profiles.remove(index);
+            if custom.enabled {
+                self.enable_preset(&preset.id);
+            }
+            if let Some(extras) = self.extra_domains.remove(&custom.id) {
+                self.extra_domains.entry(preset.id.clone()).or_default().extend(extras);
+            }
+            if !folded.contains(&preset.name) {
+                folded.push(preset.name.clone());
+            }
+        }
+        folded
+    }
+
+    /// Extras of items that no longer exist, or that the item now covers itself.
+    fn prune_extras(&mut self) {
+        let profiles: Vec<(String, Vec<String>)> = self
+            .profiles()
+            .into_iter()
+            .map(|profile| (profile.id, profile.domains))
+            .collect();
+        self.extra_domains.retain(|id, sites| {
+            let Some((_, own)) = profiles.iter().find(|(known, _)| known == id) else { return false };
+            let mut seen: Vec<String> = Vec::new();
+            sites.retain(|site| {
+                let keep = !own.iter().any(|suffix| covers(suffix, site)) && !seen.contains(site);
+                if keep {
+                    seen.push(site.clone());
+                }
+                keep
+            });
+            !sites.is_empty()
+        });
+    }
+
+    fn enable_preset(&mut self, id: &str) {
+        if !self.enabled_presets.iter().any(|existing| existing == id) {
+            self.enabled_presets.push(id.to_owned());
+        }
     }
 
     pub fn profiles(&self) -> Vec<Profile> {
+        let extras = |id: &str| self.extra_domains.get(id).cloned().unwrap_or_default();
         let mut out: Vec<Profile> = presets()
             .iter()
             .map(|preset| Profile {
                 id: preset.id.clone(),
                 name: preset.name.clone(),
                 description: preset.description.clone(),
+                category: preset.category.clone(),
+                keywords: preset.keywords.clone(),
                 processes: preset.processes.clone(),
                 domains: preset.domains.clone(),
+                extra_domains: extras(&preset.id),
                 enabled: self.enabled_presets.contains(&preset.id),
                 source: ProfileSource::Preset,
             })
@@ -143,12 +230,22 @@ impl Settings {
             id: custom.id.clone(),
             name: custom.name.clone(),
             description: String::new(),
+            category: String::new(),
+            keywords: Vec::new(),
             processes: custom.processes.clone(),
             domains: custom.domains.clone(),
+            extra_domains: extras(&custom.id),
             enabled: custom.enabled,
             source: ProfileSource::Custom,
         }));
         out
+    }
+
+    /// The enabled item that already sends `domain` through the proxy, if any.
+    pub fn owner_of(&self, domain: &str) -> Option<Profile> {
+        self.profiles()
+            .into_iter()
+            .find(|profile| profile.enabled && profile.all_domains().any(|suffix| covers(suffix, domain)))
     }
 
     /// Union of every enabled profile, sorted so the generated config (and the
@@ -157,8 +254,8 @@ impl Settings {
         let mut processes: Vec<String> = Vec::new();
         let mut domains: Vec<String> = Vec::new();
         for profile in self.profiles().into_iter().filter(|profile| profile.enabled) {
+            domains.extend(profile.all_domains().cloned());
             processes.extend(profile.processes);
-            domains.extend(profile.domains);
         }
         processes.sort_by_key(|name| name.to_lowercase());
         processes.dedup_by(|a, b| a.eq_ignore_ascii_case(b));
@@ -182,21 +279,24 @@ impl Settings {
         Ok(())
     }
 
-    /// Add a site, or re-enable the custom entry that already has it. Returns
-    /// the domain. A site an enabled item already sends through the proxy is
-    /// refused with that item's name, so the list does not fill with duplicates.
-    pub fn add_site(&mut self, input: &str) -> Result<String, String> {
+    /// Add a site. One that belongs to a built-in service switches that
+    /// service on instead, so its other sites come along: x.com alone leaves
+    /// X without its pictures and scripts on twimg.com. Otherwise the site
+    /// gets its own entry, or the entry that already has it is re-enabled. A
+    /// site an enabled item already sends through the proxy is refused with
+    /// that item's name, so the list does not fill with duplicates.
+    pub fn add_site(&mut self, input: &str) -> Result<SiteAdded, String> {
         let domain = normalise_domain(input)?;
         if let Some(existing) = self.custom_profiles.iter_mut().find(|custom| custom.domains.contains(&domain)) {
             existing.enabled = true;
-            return Ok(domain);
+            return Ok(SiteAdded { domain, preset: None });
         }
-        let owner = self
-            .profiles()
-            .into_iter()
-            .find(|profile| profile.enabled && profile.domains.iter().any(|suffix| covers(suffix, &domain)));
-        if let Some(owner) = owner {
+        if let Some(owner) = self.owner_of(&domain) {
             return Err(format!("{domain} 已经在“{}”里走代理了，不用再添加", owner.name));
+        }
+        if let Some(preset) = service_of(&domain) {
+            self.enable_preset(&preset.id);
+            return Ok(SiteAdded { domain, preset: Some(preset.id.clone()) });
         }
         let id = self.next_custom_id();
         self.custom_profiles.push(CustomProfile {
@@ -206,7 +306,50 @@ impl Settings {
             domains: vec![domain.clone()],
             enabled: true,
         });
-        Ok(domain)
+        Ok(SiteAdded { domain, preset: None })
+    }
+
+    /// Send sites an item's pages turned out to need through the proxy with
+    /// it. A site of a built-in service switches that service on; any other
+    /// joins the item's extras. Returns the sites that now go through the proxy.
+    pub fn attach_sites(&mut self, id: &str, sites: &[String]) -> Result<Vec<String>, String> {
+        if !self.profiles().iter().any(|profile| profile.id == id) {
+            return Err("找不到这个分流项目".into());
+        }
+        let mut added = Vec::new();
+        for site in sites {
+            let Ok(domain) = normalise_domain(site) else { continue };
+            if self.owner_of(&domain).is_some() {
+                continue;
+            }
+            match service_of(&domain) {
+                Some(preset) => self.enable_preset(&preset.id),
+                None => self.extra_domains.entry(id.to_owned()).or_default().push(domain.clone()),
+            }
+            added.push(domain);
+        }
+        Ok(added)
+    }
+
+    /// Take one added site out of an item again.
+    pub fn remove_extra_site(&mut self, id: &str, site: &str) -> Result<(), String> {
+        let Some(sites) = self.extra_domains.get_mut(id).filter(|sites| sites.iter().any(|existing| existing == site)) else {
+            return Err("这个网站已经不在列表里了".into());
+        };
+        sites.retain(|existing| existing != site);
+        if sites.is_empty() {
+            self.extra_domains.remove(id);
+        }
+        Ok(())
+    }
+
+    /// Never suggest these sites again.
+    pub fn ignore_sites(&mut self, sites: &[String]) {
+        for domain in normalise_all(sites) {
+            if !self.ignored_sites.contains(&domain) {
+                self.ignored_sites.push(domain);
+            }
+        }
     }
 
     /// Add an app by executable name, or on macOS by `.app` bundle. A full
@@ -264,6 +407,7 @@ impl Settings {
                 "找不到这个分流项目".into()
             });
         }
+        self.extra_domains.remove(id);
         Ok(())
     }
 
@@ -285,6 +429,9 @@ impl Settings {
         if let Some(check) = patch.check_updates {
             self.check_updates = check;
         }
+        if let Some(notify) = patch.notify_missing_sites {
+            self.notify_missing_sites = notify;
+        }
     }
 
     fn next_custom_id(&self) -> String {
@@ -296,6 +443,12 @@ impl Settings {
         let next = used.iter().max().map_or(1, |max| max + 1);
         format!("{CUSTOM_PREFIX}{next}")
     }
+}
+
+/// The one service every one of these sites belongs to.
+fn sole_service(domains: &[String]) -> Option<&'static Preset> {
+    let first = service_of(domains.first()?)?;
+    domains.iter().all(|domain| service_of(domain).is_some_and(|preset| preset.id == first.id)).then_some(first)
 }
 
 fn dedup_names(names: Vec<String>) -> Vec<String> {
@@ -391,18 +544,83 @@ mod tests {
     #[test]
     fn targets_union_enabled_profiles_sorted_and_deduped() {
         let mut settings = Settings::default();
-        // Added before the preset is on: afterwards they would be refused as covered.
-        settings.add_site("openai.com").unwrap();
+        // Added before the presets are on: afterwards they would be refused as covered.
+        // pypi.org is in a collection, so it gets its own entry.
+        settings.add_site("pypi.org").unwrap();
         settings.add_app(r"C:\Apps\Zed.exe").unwrap();
         settings.add_app("chatgpt.EXE").unwrap();
         settings.set_profile_enabled("openai", true).unwrap();
+        settings.set_profile_enabled("dev-registries", true).unwrap();
         let targets = settings.targets();
-        assert_eq!(targets.domains.iter().filter(|d| *d == "openai.com").count(), 1);
+        assert_eq!(targets.domains.iter().filter(|d| *d == "pypi.org").count(), 1);
         assert_eq!(targets.processes.iter().filter(|p| p.eq_ignore_ascii_case("chatgpt.exe")).count(), 1);
         assert!(targets.processes.contains(&"Zed.exe".to_owned()));
         let mut sorted = targets.domains.clone();
         sorted.sort();
         assert_eq!(targets.domains, sorted);
+    }
+
+    #[test]
+    fn a_site_of_a_built_in_service_switches_the_service_on() {
+        let mut settings = Settings::default();
+        let added = settings.add_site("https://x.com/home").unwrap();
+        assert_eq!(added, SiteAdded { domain: "x.com".into(), preset: Some("x".into()) });
+        assert!(settings.custom_profiles.is_empty());
+        assert!(settings.targets().domains.contains(&"twimg.com".to_owned()));
+        // Its other sites are now covered.
+        assert!(settings.add_site("abs.twimg.com").unwrap_err().contains("X (Twitter)"));
+        // A site of no known service still gets its own entry.
+        assert_eq!(settings.add_site("example.com").unwrap().preset, None);
+        assert_eq!(settings.custom_profiles.len(), 1);
+    }
+
+    #[test]
+    fn own_entries_made_before_a_preset_existed_become_the_preset() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        let file = r#"{"version":1,"customProfiles":[
+            {"id":"custom-1","name":"x.com","domains":["x.com"],"enabled":true},
+            {"id":"custom-2","name":"telegram.org","domains":["telegram.org"],"enabled":false},
+            {"id":"custom-3","name":"Zed","processes":["Zed.exe"],"domains":["x.com"],"enabled":true},
+            {"id":"custom-4","name":"example.com","domains":["example.com"],"enabled":true}],
+            "extraDomains":{"custom-1":["example.net","twimg.com"],"custom-9":["gone.com"]}}"#;
+        fs::write(&path, file).unwrap();
+        let (loaded, note) = Settings::load(&path);
+        assert!(note.unwrap().contains("“X (Twitter)”"));
+        assert_eq!(loaded.enabled_presets, vec!["x"]);
+        // The switched-off entry is folded without switching its service on.
+        let ids: Vec<_> = loaded.custom_profiles.iter().map(|c| c.id.as_str()).collect();
+        assert_eq!(ids, vec!["custom-3", "custom-4"]);
+        // Extras move along; ones the preset covers, or of items gone, are dropped.
+        assert_eq!(loaded.extra_domains.get("x"), Some(&vec!["example.net".to_owned()]));
+        assert_eq!(loaded.extra_domains.len(), 1);
+        // Saved, so the next start says nothing.
+        assert!(Settings::load(&path).1.is_none());
+    }
+
+    #[test]
+    fn suggested_sites_join_the_item_and_can_be_taken_out_again() {
+        let mut settings = Settings::default();
+        settings.add_site("example.com").unwrap();
+        let sites = vec!["cdn.example.net".to_owned(), "twimg.com".to_owned(), "example.com".to_owned()];
+        let added = settings.attach_sites("custom-1", &sites).unwrap();
+        // example.com already went through the proxy; twimg.com brought X with it.
+        assert_eq!(added, vec!["cdn.example.net", "twimg.com"]);
+        assert_eq!(settings.enabled_presets, vec!["x"]);
+        let profile = settings.profiles().into_iter().find(|p| p.id == "custom-1").unwrap();
+        assert_eq!(profile.extra_domains, vec!["cdn.example.net"]);
+        assert!(settings.targets().domains.contains(&"cdn.example.net".to_owned()));
+        assert!(settings.attach_sites("custom-404", &sites).is_err());
+
+        settings.remove_extra_site("custom-1", "cdn.example.net").unwrap();
+        assert!(settings.extra_domains.is_empty());
+        assert!(settings.remove_extra_site("custom-1", "cdn.example.net").is_err());
+        settings.attach_sites("custom-1", &["a.example.org".to_owned()]).unwrap();
+        settings.remove_profile("custom-1").unwrap();
+        assert!(settings.extra_domains.is_empty());
+
+        settings.ignore_sites(&["https://ads.example.org/x".to_owned(), "ads.example.org".to_owned()]);
+        assert_eq!(settings.ignored_sites, vec!["ads.example.org"]);
     }
 
     #[test]
@@ -426,10 +644,14 @@ mod tests {
         // The macOS name of the same program.
         assert!(settings.add_app("/opt/homebrew/bin/codex").is_err());
         assert!(settings.custom_profiles.is_empty());
-        // With the preset off the site gets its own entry, which then covers its subdomains.
+        // With the preset off, its site switches it back on, which then covers its subdomains.
         settings.set_profile_enabled("github", false).unwrap();
-        assert_eq!(settings.add_site("github.com").unwrap(), "github.com");
+        assert_eq!(settings.add_site("github.com").unwrap().preset.as_deref(), Some("github"));
+        assert!(settings.custom_profiles.is_empty());
         assert!(settings.add_site("gist.github.com").is_err());
+        // An unknown site's own entry covers its subdomains the same way.
+        settings.add_site("example.com").unwrap();
+        assert!(settings.add_site("a.example.com").is_err());
     }
 
     #[test]

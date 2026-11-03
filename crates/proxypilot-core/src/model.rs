@@ -125,10 +125,49 @@ pub struct Profile {
     pub id: String,
     pub name: String,
     pub description: String,
+    /// A preset's group on the profiles page; empty for the user's own entries.
+    #[serde(default)]
+    pub category: String,
+    /// Other names a preset is searched by.
+    #[serde(default)]
+    pub keywords: Vec<String>,
     pub processes: Vec<String>,
     pub domains: Vec<String>,
+    /// Sites the user added to this item because its pages needed them; they
+    /// go through the proxy together with `domains` and can be taken out one by one.
+    #[serde(default)]
+    pub extra_domains: Vec<String>,
     pub enabled: bool,
     pub source: ProfileSource,
+}
+
+impl Profile {
+    /// Everything this item sends through the proxy by name.
+    pub fn all_domains(&self) -> impl Iterator<Item = &String> {
+        self.domains.iter().chain(&self.extra_domains)
+    }
+}
+
+/// What "添加网站" did.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SiteAdded {
+    /// The domain as matched, `www.` and the path dropped.
+    pub domain: String,
+    /// The built-in service the site belongs to, switched on instead of a
+    /// separate entry, so the service's other sites come along.
+    pub preset: Option<String>,
+}
+
+/// Sites that could not be reached directly while an item that goes through
+/// the proxy was open, offered to that item.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Suggestion {
+    /// The item, preset or the user's own, whose pages seem to need them.
+    pub profile_id: String,
+    pub profile_name: String,
+    pub sites: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -212,6 +251,10 @@ pub struct ConnectionRow {
     pub route: Route,
     pub count: u32,
     pub last_seen: u64,
+    /// A direct connection here sat for seconds without receiving a byte: the
+    /// site is most likely blocked and needs the proxy.
+    #[serde(default)]
+    pub stalled: bool,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -223,4 +266,5 @@ pub struct SettingsPatch {
     pub log_level: Option<LogLevel>,
     pub autostart: Option<bool>,
     pub check_updates: Option<bool>,
+    pub notify_missing_sites: Option<bool>,
 }

@@ -5,6 +5,7 @@ import type { Profile } from "../api";
 import { t } from "../i18n";
 import { actions, isMac } from "../store";
 import { coverageLines, stillProxied } from "../coverage";
+import ExtraSites from "./ExtraSites.vue";
 
 // One compact row per site or app the user added: they hold one entry each,
 // and a card apiece turned a few dozen of them into a long wall of boxes.
@@ -54,6 +55,7 @@ function confirmRemove(profile: Profile) {
           <NTag v-for="kind in row.kinds" :key="kind" size="small" :bordered="false">{{ kind }}</NTag>
           <span class="name">{{ row.profile.name }}</span>
         </div>
+        <ExtraSites :profile="row.profile" />
         <NText v-for="line in row.coverage" :key="line" type="info" tag="div" class="note">{{ line }}</NText>
       </div>
       <NSwitch

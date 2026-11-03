@@ -18,17 +18,33 @@ async fn blocking<T: Send + 'static>(work: impl FnOnce() -> Cmd<T> + Send + 'sta
     tauri::async_runtime::spawn_blocking(work).await.map_err(|error| format!("内部错误：{error}"))?
 }
 
-/// Change settings, re-apply if routing is on, and return the new state.
-async fn mutate(shared: &Arc<Shared>, change: impl FnOnce(&mut proxypilot_core::settings::Settings) -> Cmd<()> + Send + 'static) -> Cmd<AppState> {
+/// The new state and what the command did.
+#[derive(serde::Serialize)]
+pub struct WithState<T> {
+    state: AppState,
+    result: T,
+}
+
+/// Change settings, re-apply if routing is on, and return the new state with
+/// what the change returned.
+async fn mutate_with<T: Send + 'static>(
+    shared: &Arc<Shared>,
+    change: impl FnOnce(&mut proxypilot_core::settings::Settings) -> Cmd<T> + Send + 'static,
+) -> Cmd<WithState<T>> {
     let shared = shared.clone();
     blocking(move || {
-        shared.update_settings(change)?;
+        let result = shared.update_settings(change)?;
         if lock(&shared.settings).routing_enabled {
             shared.request_apply();
         }
-        Ok(shared.snapshot())
+        Ok(WithState { state: shared.snapshot(), result })
     })
     .await
+}
+
+/// Change settings, re-apply if routing is on, and return the new state.
+async fn mutate(shared: &Arc<Shared>, change: impl FnOnce(&mut proxypilot_core::settings::Settings) -> Cmd<()> + Send + 'static) -> Cmd<AppState> {
+    mutate_with(shared, change).await.map(|done| done.state)
 }
 
 #[tauri::command]
@@ -117,8 +133,45 @@ pub async fn set_profile_enabled(shared: State<'_, Arc<Shared>>, id: String, ena
 }
 
 #[tauri::command]
-pub async fn add_site(shared: State<'_, Arc<Shared>>, input: String) -> Cmd<AppState> {
-    mutate(&shared, move |settings| settings.add_site(&input).map(|_| ())).await
+pub async fn add_site(shared: State<'_, Arc<Shared>>, input: String) -> Cmd<WithState<SiteAdded>> {
+    mutate_with(&shared, move |settings| settings.add_site(&input)).await
+}
+
+/// Send the sites offered for an item through the proxy with it. Returns the
+/// sites that now go through the proxy.
+#[tauri::command]
+pub async fn accept_suggestion(shared: State<'_, Arc<Shared>>, id: String) -> Cmd<WithState<Vec<String>>> {
+    let offer = lock(&shared.suggestions).take(&id).ok_or("这条提示已经处理过了")?;
+    mutate_with(&shared, move |settings| settings.attach_sites(&offer.profile_id, &offer.sites)).await
+}
+
+/// "不再提醒": the offered sites are never suggested again. Routing is
+/// unchanged, so the config is not re-applied.
+#[tauri::command]
+pub async fn ignore_suggestion(shared: State<'_, Arc<Shared>>, id: String) -> Cmd<AppState> {
+    let shared = shared.inner().clone();
+    blocking(move || {
+        if let Some(offer) = lock(&shared.suggestions).take(&id) {
+            shared.update_settings(|settings| {
+                settings.ignore_sites(&offer.sites);
+                Ok(())
+            })?;
+        }
+        Ok(shared.snapshot())
+    })
+    .await
+}
+
+/// "关闭": not now; the same sites are not offered again until a restart.
+#[tauri::command]
+pub async fn dismiss_suggestion(shared: State<'_, Arc<Shared>>, id: String) -> Cmd<AppState> {
+    lock(&shared.suggestions).dismiss(&id);
+    Ok(shared.snapshot())
+}
+
+#[tauri::command]
+pub async fn remove_extra_site(shared: State<'_, Arc<Shared>>, id: String, site: String) -> Cmd<AppState> {
+    mutate(&shared, move |settings| settings.remove_extra_site(&id, &site)).await
 }
 
 #[tauri::command]

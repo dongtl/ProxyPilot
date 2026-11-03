@@ -1,6 +1,6 @@
 // Every user-visible string lives here so a second language can be added later
 // by providing another object of the same shape.
-import type { CheckStatus, ProbeStage, UpstreamKind, UpstreamStatus } from "../api";
+import type { CheckStatus, PresetCategory, ProbeStage, UpstreamKind, UpstreamStatus } from "../api";
 
 export const zh = {
   appName: "ProxyPilot",
@@ -153,15 +153,41 @@ export const zh = {
     deleteTitle: "删除这一项？",
     deleteBody: (name: string) => `删除后，“${name}”会恢复直连。`,
     deleted: "已删除",
+    searchLabel: "搜索常用服务",
+    searchPlaceholder: "搜索，比如 推特、ins、github",
+    searchEmpty: (query: string) =>
+      `没有找到“${query}”。可以在上面“我添加的”里直接添加网站，属于常用服务的网站会自动打开对应的那一项。`,
+    categories: {
+      ai: "AI 工具",
+      web: "常用网站",
+      social: "社交和聊天",
+      media: "视频和音乐",
+      dev: "编程开发",
+    } as Record<PresetCategory, string>,
+    extraLabel: "补上的网站：",
+    extraRemoveAria: (site: string) => `从这一项里移除 ${site}`,
+    extraRemoved: "已移除",
   },
 
   addSite: {
     title: "添加网站",
     label: "网址或域名",
     placeholder: "例如 https://www.example.com/page 或 example.com",
-    hint: "可以直接粘贴地址栏里的网址，会自动去掉 https://、路径和开头的 www.。这个域名和它的所有子域名都会走代理。",
+    hint: "可以直接粘贴地址栏里的网址，会自动去掉 https://、路径和开头的 www.。这个域名和它的所有子域名都会走代理。属于常用服务的网站（比如 x.com）会直接打开那个服务，它需要的其它网站会一起走代理。",
     submit: "添加网站",
     added: "已添加网站",
+    addedPreset: (domain: string, name: string, others: string) =>
+      `${domain} 属于“${name}”，已打开这一项，${others} 也会一起走代理`,
+    addedPresetOnly: (name: string) => `已打开“${name}”`,
+  },
+
+  missing: {
+    title: (name: string) => `“${name}”的网页可能显示不全`,
+    body: (sites: string) => `它用到的 ${sites} 直连打不开。让它们一起走代理，再刷新网页就好了。`,
+    accept: "一起走代理",
+    ignore: "不再提醒",
+    dismiss: "关闭",
+    accepted: (sites: string) => `已让 ${sites} 走代理，刷新网页就好了`,
   },
 
   addApp: {
@@ -200,6 +226,8 @@ export const zh = {
     unknownProcess: "未知程序",
     routeProxy: "代理",
     routeDirect: "直连",
+    routeStalled: "打不开",
+    stalledHint: "直连几秒都没有收到数据，很可能被拦截了，可以点“改走代理”",
     filterLabel: "按走向筛选",
     filterAll: (n: number) => `全部 ${n}`,
     filterProxy: (n: number) => `代理 ${n}`,
@@ -254,6 +282,9 @@ export const zh = {
     autostartTitle: "开机自动启动",
     autostartHint: "登录 Windows 后自动在后台运行，不会弹出管理员确认。",
     autostartHintMac: "登录后自动在后台运行，只在菜单栏显示图标。系统可能提示“已添加后台项目”，这是正常的。",
+    notifyTitle: "网页显示不全时提醒",
+    notifyHint:
+      "打开走代理的网站时，如果它用到的其它网站直连打不开，会弹出系统通知，打开 ProxyPilot 点一下就能补上。只在本机检查，不发送任何数据。窗口里的提示不受这个开关影响。",
     dataDirTitle: "数据目录",
     dataDirHint: "设置、生成的配置和日志都在这里。",
     openDataDir: "打开数据目录",

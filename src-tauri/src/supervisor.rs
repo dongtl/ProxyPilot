@@ -253,7 +253,11 @@ impl Supervisor {
         }
         // Transient failures (core restarting) are expected; the next poll catches up.
         if let Ok(connections) = fetch_connections(api.port, &api.secret, Duration::from_secs(1)) {
-            lock(&self.shared.traffic).ingest(&connections, now_ms());
+            let now = now_ms();
+            let stalls = lock(&self.shared.traffic).ingest(&connections, now);
+            if !stalls.is_empty() {
+                crate::missing::found(&self.shared, &stalls, now);
+            }
         }
     }
 

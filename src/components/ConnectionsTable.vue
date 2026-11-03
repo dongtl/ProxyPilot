@@ -3,8 +3,9 @@ import { computed, h, ref } from "vue";
 import { NButton, NDataTable, NDropdown, NTag, useMessage, type DataTableColumns } from "naive-ui";
 import type { ConnectionRow } from "../api";
 import { t } from "../i18n";
-import { actions } from "../store";
+import { actions, appState } from "../store";
 import { formatDateTime, formatRelativeTime, formatTarget, isIpAddress } from "../format";
+import { siteAddedText } from "../coverage";
 
 const props = defineProps<{ rows: ConnectionRow[]; now: number }>();
 // An open "改走代理" menu: the page holds the list still so the row cannot move away under it.
@@ -37,8 +38,14 @@ function choices(row: ConnectionRow): { key: Choice; label: string }[] {
 async function choose(row: ConnectionRow, choice: Choice) {
   pending.value = rowKey(row);
   const target = choice === "app" ? row.process : choice === "site" ? row.site! : hostDomain(row.host);
-  const ok = choice === "app" ? await actions.addApp(row.process) : await actions.addSite(target);
-  if (ok) message.success(t.connections.added(target));
+  if (choice === "app") {
+    if (await actions.addApp(row.process)) message.success(t.connections.added(target));
+  } else {
+    const added = await actions.addSite(target);
+    // A site of a built-in service switched the whole service on; say so.
+    if (added?.preset) message.success(siteAddedText(added, appState.value?.profiles ?? []), { duration: 6000 });
+    else if (added) message.success(t.connections.added(target));
+  }
   pending.value = null;
 }
 
@@ -89,13 +96,19 @@ const columns = computed((): DataTableColumns<ConnectionRow> => [
   {
     key: "route",
     title: t.connections.colRoute,
-    width: 64,
+    width: 72,
     render: (row) =>
-      h(
-        NTag,
-        { size: "small", bordered: false, type: row.route === "proxy" ? "success" : "default" },
-        () => (row.route === "proxy" ? t.connections.routeProxy : t.connections.routeDirect),
-      ),
+      row.route === "direct" && row.stalled
+        ? h(
+            NTag,
+            { size: "small", bordered: false, type: "warning", title: t.connections.stalledHint },
+            () => t.connections.routeStalled,
+          )
+        : h(
+            NTag,
+            { size: "small", bordered: false, type: row.route === "proxy" ? "success" : "default" },
+            () => (row.route === "proxy" ? t.connections.routeProxy : t.connections.routeDirect),
+          ),
   },
   { key: "count", title: t.connections.colCount, width: 60, align: "right" },
   {

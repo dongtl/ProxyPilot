@@ -1,7 +1,8 @@
 //! State shared by IPC commands, the tray and the supervisor thread.
 //!
-//! Lock discipline: take one of `settings`, `runtime`, `traffic`, `update` at a
-//! time and copy out what you need. Nothing holds two locks, so nothing can deadlock.
+//! Lock discipline: take one of `settings`, `runtime`, `traffic`, `update`,
+//! `suggestions` at a time and copy out what you need. Nothing holds two
+//! locks, so nothing can deadlock.
 
 use crate::paths::{AppPaths, append_log};
 use crate::tray::TrayHandles;
@@ -56,6 +57,9 @@ pub struct AppState {
     pub update: Option<crate::updates::UpdateInfo>,
     /// When the last check ran and, if it failed, why; None before the first.
     pub last_check: Option<crate::updates::LastCheck>,
+    /// Sites a proxied page needed but could not reach directly, offered per item.
+    pub suggestions: Vec<Suggestion>,
+    pub notify_missing_sites: bool,
     /// Whether a TUN can be created: administrator rights on Windows, a
     /// ready background helper on macOS.
     pub elevated: bool,
@@ -92,6 +96,8 @@ pub struct Shared {
     pub clash_api: Option<proxypilot_core::config::ClashApi>,
     /// The found release, the last check, and the check or download running now.
     pub update: Mutex<crate::updates::UpdateState>,
+    /// Sites offered to items whose pages could not reach them directly.
+    pub suggestions: Mutex<proxypilot_core::suggest::Suggestions>,
     /// macOS: running outside the Applications folder; what the window offers.
     pub relocation: Option<crate::relocate::Relocation>,
 }
@@ -123,6 +129,7 @@ impl Shared {
             let update = lock(&self.update);
             (update.found.as_ref().map(crate::updates::info), update.last_check.clone())
         };
+        let suggestions = lock(&self.suggestions).current(&settings);
         // A failed apply that fell back to the previous rules is still
         // "running"; say so where the user looks for problems.
         if core_status == CoreStatus::Running && !core_message.is_empty() {
@@ -150,6 +157,8 @@ impl Shared {
             check_updates: settings.check_updates,
             update,
             last_check,
+            suggestions,
+            notify_missing_sites: settings.notify_missing_sites,
             elevated: self.can_route.load(Ordering::Relaxed),
             platform: if cfg!(target_os = "macos") { "macos" } else { "windows" },
             helper_installed: helper_installed(),
