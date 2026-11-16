@@ -84,7 +84,7 @@ fn reconnect(within: Duration) -> Option<Client> {
 }
 
 fn failed(message: String) -> ApplyOutcome {
-    ApplyOutcome { ok: false, message, rolled_back: false, kept_previous: false, adapter_taken: false }
+    ApplyOutcome { ok: false, message, rolled_back: false, kept_previous: false, adapter_taken: false, timed_out: false }
 }
 
 impl Backend for HelperBackend {

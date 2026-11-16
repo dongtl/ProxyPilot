@@ -3,9 +3,14 @@
 //!
 //! The order matters. A candidate is validated before anything is touched;
 //! the running config is backed up before the core stops; the new file
-//! replaces the old one atomically; and if the new core does not bring the
-//! adapter up in time, the previous config is restored and started again. The
-//! user ends up either on the new rules or on the old ones, never on none.
+//! replaces the old one atomically; and if the new core exits while starting,
+//! the previous config is restored and started again, so a config sing-box
+//! cannot run never leaves the user on no rules.
+//!
+//! A core that stays up but brings the adapter up late is a slow system, not
+//! a bad config: the old rules would wait on the same adapter. It is stopped,
+//! the new config stays installed, and the outcome says so, so the caller can
+//! start it again later.
 
 use crate::config::RuntimePaths;
 use crate::sys;
@@ -20,6 +25,10 @@ const CHECK_TIMEOUT: Duration = Duration::from_secs(15);
 const LOG_ROTATE_BYTES: u64 = 20 * 1024 * 1024;
 /// How long a core we stopped may keep its adapter around while Windows tears it down.
 const ADAPTER_RELEASE: Duration = Duration::from_secs(5);
+/// How long a running core may take to bring its adapter up. Swapping our
+/// adapter for a new one usually takes Windows 3 to 5 seconds, more when the
+/// machine is busy; a core that exits is noticed at once regardless.
+const STARTUP_GRACE: Duration = Duration::from_secs(20);
 
 /// Shown when an adapter with our name is up and it is not our core's.
 pub const ADAPTER_TAKEN: &str = "ProxyPilot 虚拟网卡已被其它程序占用，常见原因是旧版 ProxyPilot 还在运行，请先退出它";
@@ -178,15 +187,19 @@ pub struct ApplyOutcome {
     /// Nothing was started because another program holds an adapter with
     /// our name. The new config is installed; starting later can succeed.
     pub adapter_taken: bool,
+    /// The new core stayed up but did not bring the adapter up in time, and
+    /// was stopped. The new config is installed; starting later can succeed.
+    #[serde(default)]
+    pub timed_out: bool,
 }
 
 impl ApplyOutcome {
     fn ok(message: &str) -> Self {
-        ApplyOutcome { ok: true, message: message.into(), rolled_back: false, kept_previous: false, adapter_taken: false }
+        ApplyOutcome { ok: true, message: message.into(), rolled_back: false, kept_previous: false, adapter_taken: false, timed_out: false }
     }
 
     fn failed(message: String, kept_previous: bool) -> Self {
-        ApplyOutcome { ok: false, message, rolled_back: false, kept_previous, adapter_taken: false }
+        ApplyOutcome { ok: false, message, rolled_back: false, kept_previous, adapter_taken: false, timed_out: false }
     }
 }
 
@@ -202,6 +215,8 @@ pub struct CoreManager {
     /// Until then, an adapter with our name may still be our last core's.
     released_at: Option<Instant>,
     adapter_taken: bool,
+    /// The last start gave up on a core that was still running.
+    timed_out: bool,
 }
 
 impl CoreManager {
@@ -212,12 +227,13 @@ impl CoreManager {
             runner,
             paths,
             ready,
-            startup_grace: Duration::from_secs(5),
+            startup_grace: STARTUP_GRACE,
             process: None,
             last_start_error: String::new(),
             log_offset: 0,
             released_at: None,
             adapter_taken: false,
+            timed_out: false,
         }
     }
 
@@ -292,6 +308,7 @@ impl CoreManager {
     fn start_current(&mut self) -> bool {
         self.last_start_error.clear();
         self.adapter_taken = false;
+        self.timed_out = false;
         // `ready` cannot tell whose adapter it sees. Starting while one with
         // our name is up would report success at once, and then the core
         // would die failing to create its own.
@@ -324,6 +341,7 @@ impl CoreManager {
                 return true;
             }
             if Instant::now() >= deadline {
+                self.timed_out = true;
                 self.last_start_error = "等待 ProxyPilot 虚拟网卡就绪超时".into();
                 process.kill();
                 self.mark_released();
@@ -374,6 +392,11 @@ impl CoreManager {
             // The previous config would meet the same adapter; nothing to roll back to.
             return ApplyOutcome { adapter_taken: true, ..ApplyOutcome::failed(ADAPTER_TAKEN.into(), false) };
         }
+        if self.timed_out {
+            // The core was running: the system is slow, not the config wrong,
+            // and the previous config would wait on the same adapter.
+            return ApplyOutcome { timed_out: true, ..ApplyOutcome::failed(self.last_start_error.clone(), false) };
+        }
         let detail = if self.last_start_error.is_empty() { "未知错误".to_owned() } else { self.last_start_error.clone() };
         self.restore_previous(format!("新配置启动失败：{detail}"), had_current)
     }
@@ -416,8 +439,11 @@ mod tests {
         rejected: Arc<Mutex<Vec<String>>>,
         /// Config file contents whose process exits immediately.
         crashing: Arc<Mutex<Vec<String>>>,
+        /// Config file contents whose process keeps running without bringing the adapter up.
+        hanging: Arc<Mutex<Vec<String>>>,
         starts: Arc<AtomicUsize>,
         alive: Arc<AtomicBool>,
+        stuck: Arc<AtomicBool>,
     }
 
     struct FakeProcess {
@@ -452,13 +478,15 @@ mod tests {
                 writeln!(file, "FATAL start {n}")?;
             }
             self.alive.store(!crashed, Ordering::SeqCst);
+            self.stuck.store(self.hanging.lock().unwrap().contains(&text), Ordering::SeqCst);
             Ok(Box::new(FakeProcess { crashed, alive: self.alive.clone() }))
         }
     }
 
     fn manager(dir: &Path, script: &Script) -> CoreManager {
-        let alive = script.alive.clone();
-        CoreManager::new(Box::new(script.clone()), RuntimePaths::new(dir), Box::new(move || alive.load(Ordering::SeqCst)))
+        let (alive, stuck) = (script.alive.clone(), script.stuck.clone());
+        let ready = move || alive.load(Ordering::SeqCst) && !stuck.load(Ordering::SeqCst);
+        CoreManager::new(Box::new(script.clone()), RuntimePaths::new(dir), Box::new(ready))
             .with_startup_grace(Duration::from_millis(200))
     }
 
@@ -516,6 +544,28 @@ mod tests {
         let outcome = core.apply(&candidate(dir.path(), "v1"));
         assert!(!outcome.ok && !outcome.rolled_back);
         assert!(!core.running());
+    }
+
+    /// A slow adapter is the system's fault: the old rules would wait on it
+    /// too, so they are not tried; the new ones start once it is quick again.
+    #[test]
+    fn slow_adapter_keeps_the_new_config_for_a_later_start() {
+        let dir = tempfile::tempdir().unwrap();
+        let script = Script::default();
+        let mut core = manager(dir.path(), &script);
+        assert!(core.apply(&candidate(dir.path(), "v1")).ok);
+        script.hanging.lock().unwrap().push("v2".into());
+        let outcome = core.apply(&candidate(dir.path(), "v2"));
+        assert!(!outcome.ok && outcome.timed_out && !outcome.rolled_back && !outcome.kept_previous, "{outcome:?}");
+        assert!(outcome.message.contains("超时"), "{}", outcome.message);
+        assert_eq!(script.starts.load(Ordering::SeqCst), 2, "the old config must not be started again");
+        assert!(!core.running());
+        assert_eq!(fs::read_to_string(&core.paths().current).unwrap(), "v2");
+        assert_eq!(fs::read_to_string(&core.paths().previous).unwrap(), "v1");
+        script.hanging.lock().unwrap().clear();
+        core.restart().unwrap();
+        assert!(core.running());
+        assert_eq!(script.starts.load(Ordering::SeqCst), 3);
     }
 
     #[test]

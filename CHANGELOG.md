@@ -2,6 +2,12 @@
 
 <!-- 每个版本一节，标题写成「## 版本号」。发版时这一节会显示在应用的更新提示里，所以写给普通用户看，用纯文本列表。 -->
 
+## 0.3.5
+
+- 修正：添加网站、开关服务或换代理端口之后，偶尔会提示“等待 ProxyPilot 虚拟网卡就绪超时”，然后分流一直关着，要手动关掉再打开才恢复。原因是 Windows 那一刻换虚拟网卡比平时慢。
+- 现在虚拟网卡慢的时候会多等一会儿；万一还是没起来，会在几秒后自动再试，窗口里显示倒计时，不用手动操作。
+- 日志里会记下每次启用分流用了多久，方便以后排查偶尔出现的问题。
+
 ## 0.3.4
 
 - 常用服务增加到 27 个，新增 X (Twitter)、Instagram、Facebook、Threads、WhatsApp、Telegram、Discord、Reddit、维基百科、Netflix、Twitch、TikTok、Spotify、Perplexity、Grok、Poe、Medium、Quora、Pinterest、Dropbox。每一项都配好了它需要的配套网站，打开开关就能正常显示，不用自己找域名。

@@ -124,7 +124,7 @@ impl LocalBackend {
 
 impl Backend for LocalBackend {
     fn apply(&mut self, request: &ApplyRequest) -> ApplyOutcome {
-        let failed = |message: String| ApplyOutcome { ok: false, message, rolled_back: false, kept_previous: false, adapter_taken: false };
+        let failed = |message: String| ApplyOutcome { ok: false, message, rolled_back: false, kept_previous: false, adapter_taken: false, timed_out: false };
         if let Err(message) = request.validate() {
             return failed(message);
         }

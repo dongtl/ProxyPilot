@@ -21,12 +21,22 @@ const RESTART_BACKOFF: [u64; 5] = [2, 5, 15, 60, 60];
 /// A core that ran this long before dying is a fresh failure, not a crash loop.
 const STABLE_AFTER: Duration = Duration::from_secs(300);
 
+/// What to do when a retry comes due.
+#[derive(Clone, Copy)]
+enum Retry {
+    /// Start the installed config again.
+    Restart,
+    /// Apply the settings again: the installed config is the older one,
+    /// left behind by a rollback that did not start either.
+    Apply,
+}
+
 struct Supervisor {
     shared: Arc<Shared>,
     /// None when the install is missing sing-box (or, on macOS, the helper files).
     core: Option<Box<dyn Backend>>,
     pending_apply: Option<Instant>,
-    restart_at: Option<Instant>,
+    retry: Option<(Instant, Retry)>,
     failures: usize,
     started_at: Option<Instant>,
     applied_owner: Option<String>,
@@ -46,7 +56,7 @@ pub fn spawn(shared: Arc<Shared>, rx: Receiver<Msg>) {
                 shared,
                 core,
                 pending_apply: None,
-                restart_at: None,
+                retry: None,
                 failures: 0,
                 started_at: None,
                 applied_owner: None,
@@ -83,6 +93,11 @@ fn due(last: Option<Instant>, every: Duration) -> bool {
     last.is_none_or(|at| at.elapsed() >= every)
 }
 
+/// "3.2 秒", for the log.
+fn seconds(since: Instant) -> String {
+    format!("{:.1} 秒", since.elapsed().as_secs_f64())
+}
+
 impl Supervisor {
     fn run(&mut self, rx: Receiver<Msg>) {
         self.check_health();
@@ -108,13 +123,19 @@ impl Supervisor {
     fn tick(&mut self) {
         if self.pending_apply.is_some_and(|at| Instant::now() >= at) {
             self.pending_apply = None;
-            self.restart_at = None;
+            self.retry = None;
             self.failures = 0;
             self.apply();
         }
-        if self.restart_at.is_some_and(|at| Instant::now() >= at) {
-            self.restart_at = None;
-            self.restart();
+        if let Some((at, retry)) = self.retry
+            && Instant::now() >= at
+        {
+            self.retry = None;
+            match retry {
+                Retry::Restart => self.restart(),
+                // Keeps the failure count, unlike a fresh apply.
+                Retry::Apply => self.apply(),
+            }
         }
         self.watch_core();
         if due(self.last_traffic, TRAFFIC_EVERY) {
@@ -163,26 +184,38 @@ impl Supervisor {
 
         let owner = upstream_owner(&upstream).and_then(|(_, name)| name);
         let targets = settings.targets();
+        let begun = Instant::now();
         let outcome = core.apply(&ApplyRequest::from_settings(&settings, &upstream, owner.as_deref(), api));
         let pid = core.pid();
+        // The time goes in the log: slow starts are rare and cannot be
+        // caught on purpose, so each one has to leave its own trace.
+        let took = seconds(begun);
         if outcome.ok {
             self.started_at = Some(Instant::now());
             self.applied_owner = owner;
             set_core(&self.shared, CoreStatus::Running, "", pid);
             self.shared.log(&format!(
-                "分流已启用：上游 {}:{}，{} 个程序、{} 个域名走代理",
+                "分流已启用：上游 {}:{}，{} 个程序、{} 个域名走代理，用时 {took}",
                 upstream.host, upstream.port, targets.processes.len(), targets.domains.len()
             ));
-        } else if outcome.adapter_taken {
-            // Usually an older build still in the tray. Retry with backoff so
-            // routing comes up on its own once the user quits it.
-            self.shared.log(&format!("启用分流失败：{}", outcome.message));
+        } else if outcome.adapter_taken || outcome.timed_out {
+            // The new config is installed and nothing runs. Taken: usually an
+            // older build still in the tray. Timed out: Windows was slow to
+            // swap the adapter. Either way, starting it again later can work.
+            self.shared.log(&format!("启用分流失败（用时 {took}）：{}", outcome.message));
             self.applied_owner = owner;
-            self.core_down(outcome.message);
+            self.core_down(outcome.message, Retry::Restart);
             return;
         } else if outcome.kept_previous {
+            self.started_at = Some(Instant::now());
             set_core(&self.shared, CoreStatus::Running, &outcome.message, pid);
             self.shared.log(&format!("应用新规则失败，已保留上一份：{}", outcome.message));
+        } else if outcome.rolled_back {
+            // Neither the new config nor the old one started: the system is
+            // in the way rather than the rules, so try the new rules again.
+            self.shared.log(&format!("启用分流失败（用时 {took}）：{}", outcome.message));
+            self.core_down(outcome.message, Retry::Apply);
+            return;
         } else {
             set_core(&self.shared, CoreStatus::Failed, &outcome.message, None);
             self.shared.log(&format!("启用分流失败：{}", outcome.message));
@@ -192,15 +225,19 @@ impl Supervisor {
 
     fn restart(&mut self) {
         let Some(core) = &mut self.core else { return };
+        let begun = Instant::now();
         match core.restart() {
             Ok(()) => {
                 self.started_at = Some(Instant::now());
                 let pid = core.pid();
                 set_core(&self.shared, CoreStatus::Running, "", pid);
-                self.shared.log("sing-box 已自动重启");
+                self.shared.log(&format!("sing-box 已自动重启，用时 {}", seconds(begun)));
                 self.shared.emit();
             }
-            Err(error) => self.core_down(error),
+            Err(error) => {
+                self.shared.log(&format!("sing-box 自动重启失败（用时 {}）：{error}", seconds(begun)));
+                self.core_down(error, Retry::Restart);
+            }
         }
     }
 
@@ -212,11 +249,11 @@ impl Supervisor {
             self.shared.emit();
             return;
         }
-        self.core_down(reason);
+        self.core_down(reason, Retry::Restart);
     }
 
     /// The core is gone while routing should be on: retry with backoff, then give up.
-    fn core_down(&mut self, reason: String) {
+    fn core_down(&mut self, reason: String, retry: Retry) {
         if self.started_at.is_some_and(|at| at.elapsed() >= STABLE_AFTER) {
             self.failures = 0;
         }
@@ -226,7 +263,7 @@ impl Supervisor {
             set_core(&self.shared, CoreStatus::Failed, &format!("{reason}。已连续重启失败，请查看日志或重新开启分流"), None);
         } else {
             let wait = RESTART_BACKOFF[self.failures - 1];
-            self.restart_at = Some(Instant::now() + Duration::from_secs(wait));
+            self.retry = Some((Instant::now() + Duration::from_secs(wait), retry));
             set_core(&self.shared, CoreStatus::Starting, &format!("{reason}。{wait} 秒后自动重启"), None);
         }
         self.shared.emit();
@@ -237,7 +274,7 @@ impl Supervisor {
             core.stop();
         }
         self.pending_apply = None;
-        self.restart_at = None;
+        self.retry = None;
         self.failures = 0;
         self.started_at = None;
         self.applied_owner = None;
